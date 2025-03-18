@@ -3,6 +3,7 @@ import { Player, GameSettings } from "./types";
 
 // Define types to avoid missing BABYLON reference
 let BABYLON: any = null;
+let GUI: any = null;
 
 // Only initialize on client side
 async function loadBabylonModules() {
@@ -12,6 +13,16 @@ async function loadBabylonModules() {
       const core = await import("@babylonjs/core");
       console.log("Babylon.js core loaded successfully");
       BABYLON = core;
+
+      // Load GUI module separately
+      try {
+        const gui = await import("@babylonjs/gui");
+        console.log("Babylon.js GUI loaded successfully");
+        GUI = gui;
+      } catch (guiError) {
+        console.error("Failed to load GUI module:", guiError);
+      }
+
       return true;
     } catch (error) {
       console.error("Failed to load Babylon.js modules:", error);
@@ -43,6 +54,8 @@ export class GameEngine {
   private recoilAnimation: any;
   private isRecoiling: boolean = false;
   private initialized: boolean = false;
+  private walls: any[] = [];
+  private crosshair: any;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -85,17 +98,22 @@ export class GameEngine {
         this.scene
       );
       this.camera.setTarget(new BABYLON.Vector3(0, 1.8, 1));
-      this.camera.attachControl(this.canvas, true);
+      this.camera.attachControl(this.canvas, false); // Set false to enable rotation without clicking
       this.camera.applyGravity = true;
       this.camera.checkCollisions = true;
       this.camera.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5);
       this.camera.minZ = 0.1;
+      this.camera.inertia = 0.5; // Lower inertia for smoother movement
+      this.camera.angularSensibility = 500; // Adjust sensitivity for camera rotation
 
       // Controls
       this.camera.keysUp.push(87); // W
       this.camera.keysDown.push(83); // S
       this.camera.keysLeft.push(65); // A
       this.camera.keysRight.push(68); // D
+
+      // Add crosshair
+      this.createCrosshair();
 
       // Light setup
       console.log("Setting up lighting");
@@ -122,6 +140,9 @@ export class GameEngine {
       groundMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.3);
       groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
       this.ground.material = groundMaterial;
+
+      // Create boundaries
+      this.createBoundaries();
 
       // Recoil animation
       console.log("Setting up weapon animations");
@@ -163,12 +184,165 @@ export class GameEngine {
     }
   }
 
+  private createCrosshair(): void {
+    if (!BABYLON || !this.scene || !GUI) {
+      console.warn("Cannot create crosshair - GUI module not available");
+      return;
+    }
+
+    try {
+      // Create a simple crosshair using DOM instead of Babylon GUI
+      const crosshairHTML = document.createElement("div");
+      crosshairHTML.id = "crosshair";
+      crosshairHTML.style.position = "absolute";
+      crosshairHTML.style.top = "50%";
+      crosshairHTML.style.left = "50%";
+      crosshairHTML.style.width = "20px";
+      crosshairHTML.style.height = "20px";
+      crosshairHTML.style.transform = "translate(-50%, -50%)";
+      crosshairHTML.style.pointerEvents = "none";
+      crosshairHTML.innerHTML = `
+        <style>
+          #crosshair::before, #crosshair::after {
+            content: "";
+            position: absolute;
+            background-color: white;
+          }
+          #crosshair::before {
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            transform: translateY(-50%);
+          }
+          #crosshair::after {
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            transform: translateX(-50%);
+          }
+        </style>
+      `;
+
+      document.body.appendChild(crosshairHTML);
+
+      this.crosshair = crosshairHTML;
+    } catch (error) {
+      console.error("Failed to create crosshair:", error);
+    }
+  }
+
+  private createBoundaries(): void {
+    if (!BABYLON || !this.scene) return;
+
+    const wallHeight = 10;
+    const mapSize = 100; // Match the ground size
+    const wallThickness = 2;
+
+    // Create materials
+    const wallMaterial = new BABYLON.StandardMaterial(
+      "wallMaterial",
+      this.scene
+    );
+    wallMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.3);
+    wallMaterial.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.1);
+
+    // Create four walls
+    // North wall
+    const northWall = BABYLON.MeshBuilder.CreateBox(
+      "northWall",
+      {
+        width: mapSize + wallThickness * 2,
+        height: wallHeight,
+        depth: wallThickness,
+      },
+      this.scene
+    );
+    northWall.position = new BABYLON.Vector3(
+      0,
+      wallHeight / 2,
+      mapSize / 2 + wallThickness / 2
+    );
+    northWall.material = wallMaterial;
+    northWall.checkCollisions = true;
+    this.walls.push(northWall);
+
+    // South wall
+    const southWall = BABYLON.MeshBuilder.CreateBox(
+      "southWall",
+      {
+        width: mapSize + wallThickness * 2,
+        height: wallHeight,
+        depth: wallThickness,
+      },
+      this.scene
+    );
+    southWall.position = new BABYLON.Vector3(
+      0,
+      wallHeight / 2,
+      -mapSize / 2 - wallThickness / 2
+    );
+    southWall.material = wallMaterial;
+    southWall.checkCollisions = true;
+    this.walls.push(southWall);
+
+    // East wall
+    const eastWall = BABYLON.MeshBuilder.CreateBox(
+      "eastWall",
+      { width: wallThickness, height: wallHeight, depth: mapSize },
+      this.scene
+    );
+    eastWall.position = new BABYLON.Vector3(
+      mapSize / 2 + wallThickness / 2,
+      wallHeight / 2,
+      0
+    );
+    eastWall.material = wallMaterial;
+    eastWall.checkCollisions = true;
+    this.walls.push(eastWall);
+
+    // West wall
+    const westWall = BABYLON.MeshBuilder.CreateBox(
+      "westWall",
+      { width: wallThickness, height: wallHeight, depth: mapSize },
+      this.scene
+    );
+    westWall.position = new BABYLON.Vector3(
+      -mapSize / 2 - wallThickness / 2,
+      wallHeight / 2,
+      0
+    );
+    westWall.material = wallMaterial;
+    westWall.checkCollisions = true;
+    this.walls.push(westWall);
+  }
+
   private setupInputHandling(): void {
     if (!this.scene) return;
 
     this.scene.onPointerDown = (evt: any) => {
       if (evt.button === 0) {
         // Left click
+        this.shoot();
+      }
+    };
+
+    // Lock the pointer when clicking in the canvas
+    this.scene.onPointerDown = (evt: any) => {
+      if (!this.scene.isPointerLock) {
+        this.canvas.requestPointerLock =
+          this.canvas.requestPointerLock ||
+          (this.canvas as any).mozRequestPointerLock ||
+          (this.canvas as any).webkitRequestPointerLock;
+
+        if (this.canvas.requestPointerLock) {
+          this.canvas.requestPointerLock();
+        }
+      }
+
+      // Still handle shooting
+      if (evt.button === 0) {
         this.shoot();
       }
     };
@@ -487,19 +661,19 @@ export class GameEngine {
   }
 
   public enableDebugLayer(): void {
-    if (!this.scene) return;
-
-    try {
-      console.log("Enabling debug layer");
-      this.scene.debugLayer.show();
-    } catch (error) {
-      console.warn("Failed to enable debug layer:", error);
-    }
+    // We're not going to try to load the debug layer since it's causing issues
+    console.log("Debug layer disabled to avoid Inspector issues");
   }
 
   public dispose(): void {
     if (this.engine) {
       console.log("Disposing game engine");
+
+      // Remove crosshair if it exists
+      if (this.crosshair && this.crosshair.parentNode) {
+        document.body.removeChild(this.crosshair);
+      }
+
       this.engine.dispose();
     }
   }
