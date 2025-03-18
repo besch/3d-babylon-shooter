@@ -165,3 +165,71 @@ export async function listenForMapObjectUpdates(
     )
     .subscribe();
 }
+
+/**
+ * Send player damage update to the server
+ */
+export async function updatePlayerHealth(playerId: string, newHealth: number) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  return supabase
+    .from("players")
+    .update({
+      health: newHealth,
+      last_updated: new Date().toISOString(),
+    })
+    .eq("id", playerId);
+}
+
+/**
+ * Update player deaths count
+ */
+export async function incrementPlayerDeaths(playerId: string) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  // First get current deaths count
+  const { data } = await supabase
+    .from("players")
+    .select("deaths")
+    .eq("id", playerId)
+    .single();
+
+  if (data) {
+    // Increment deaths count
+    return supabase
+      .from("players")
+      .update({
+        deaths: data.deaths + 1,
+        last_updated: new Date().toISOString(),
+      })
+      .eq("id", playerId);
+  }
+}
+
+/**
+ * Update player kills count
+ */
+export async function incrementPlayerKills(playerId: string) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  // First get current kills count
+  const { data } = await supabase
+    .from("players")
+    .select("kills")
+    .eq("id", playerId)
+    .single();
+
+  if (data) {
+    // Increment kills count
+    return supabase
+      .from("players")
+      .update({
+        kills: data.kills + 1,
+        last_updated: new Date().toISOString(),
+      })
+      .eq("id", playerId);
+  }
+}

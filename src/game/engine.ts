@@ -502,23 +502,39 @@ export class GameEngine {
   private createProjectile(): void {
     if (!this.localPlayer || !BABYLON || !this.scene || !this.camera) return;
 
-    // Create projectile
+    // Generate a unique ID for the projectile
+    const projectileId = `proj-${Date.now()}-${Math.floor(
+      Math.random() * 1000
+    )}`;
+
+    // Create a larger and brighter projectile
     const projectile = BABYLON.MeshBuilder.CreateSphere(
-      "projectile",
-      { diameter: 0.1 },
+      projectileId,
+      { diameter: 0.25 }, // Larger diameter for better visibility
       this.scene
     );
+
+    // Create a glow layer for projectiles if it doesn't exist yet
+    let glowLayer = this.scene.getGlowLayerByName("projectileGlow");
+    if (!glowLayer) {
+      glowLayer = new BABYLON.GlowLayer("projectileGlow", this.scene);
+      glowLayer.intensity = 1.0;
+    }
+
     const projectileMaterial = new BABYLON.StandardMaterial(
-      "projectileMaterial",
+      `projectileMaterial-${projectileId}`,
       this.scene
     );
-    projectileMaterial.diffuseColor = new BABYLON.Color3(1, 0, 0);
-    projectileMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
+    projectileMaterial.diffuseColor = new BABYLON.Color3(1, 0.3, 0.3);
+    projectileMaterial.emissiveColor = new BABYLON.Color3(1, 0.3, 0.3); // Bright red glow
+    projectileMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
     projectile.material = projectileMaterial;
+
+    // Add the projectile to the glow layer
+    glowLayer.addIncludedOnlyMesh(projectile);
 
     // Get the exact direction where the camera is looking
     const direction = this.getForwardDirection();
-    console.log("Shooting direction:", direction);
 
     // Position the projectile directly in front of the camera (centered with the crosshair)
     projectile.position = new BABYLON.Vector3(
@@ -527,58 +543,229 @@ export class GameEngine {
       this.camera.position.z
     ).add(direction.scale(1)); // Start 1 unit in front of camera
 
+    // Add a trail effect to make projectile more visible
+    const trail = new BABYLON.TrailMesh(
+      "trail",
+      projectile,
+      this.scene,
+      0.1,
+      30,
+      true
+    );
+    const trailMaterial = new BABYLON.StandardMaterial(
+      "trailMaterial",
+      this.scene
+    );
+    trailMaterial.emissiveColor = new BABYLON.Color3(1, 0.3, 0.3);
+    trailMaterial.diffuseColor = new BABYLON.Color3(1, 0.05, 0.05);
+    trailMaterial.alpha = 0.7;
+    trail.material = trailMaterial;
+
     // Simple projectile motion
     const speed = this.settings.projectileSpeed;
+    const velocity = direction.scale(speed);
 
-    // Create animation to move the projectile
-    const frameRate = 60;
-    const projectileAnimation = new BABYLON.Animation(
-      "projectileAnimation",
-      "position",
-      frameRate,
-      BABYLON.Animation.ANIMATIONTYPE_VECTOR3,
-      BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT
+    // Create a physics impostor for collision detection
+    projectile.physicsImpostor = new BABYLON.PhysicsImpostor(
+      projectile,
+      BABYLON.PhysicsImpostor.SphereImpostor,
+      { mass: 0.1, friction: 0.5, restitution: 0.3 },
+      this.scene
     );
 
-    // Set keyframes for linear motion
-    const keyframes = [];
-    keyframes.push({
-      frame: 0,
-      value: projectile.position.clone(),
-    });
+    // Store the shooter ID for hit detection
+    projectile.metadata = {
+      shooterId: this.localPlayer.id,
+      damage: this.settings.maxHealth / this.settings.shootsToKill,
+    };
 
-    // Calculate end position (50 units in front of starting position)
-    const targetPosition = projectile.position.add(direction.scale(50));
+    // Set the velocity directly
+    projectile.physicsImpostor.setLinearVelocity(velocity);
 
-    keyframes.push({
-      frame: frameRate * 2, // 2 seconds
-      value: targetPosition,
-    });
+    // Register collision event
+    projectile.physicsImpostor.registerOnPhysicsCollide(
+      this.scene.getPhysicsImpostors(),
+      (collider: any) => {
+        const collidedMesh = collider.object;
 
-    projectileAnimation.setKeys(keyframes);
-    projectile.animations.push(projectileAnimation);
+        // Check if we hit a player
+        if (
+          collidedMesh.name.startsWith("player-") &&
+          collidedMesh.metadata?.playerId
+        ) {
+          const hitPlayerId = collidedMesh.metadata.playerId;
 
-    // Start animation
-    this.scene.beginAnimation(projectile, 0, frameRate * 2, false, 1, () => {
-      projectile.dispose();
-    });
+          // Don't damage yourself
+          if (hitPlayerId !== this.localPlayer?.id) {
+            this.damagePlayer(hitPlayerId, projectile.metadata.damage);
+          }
+        }
 
-    // Destroy projectile after 2 seconds as a backup
+        // Dispose of the projectile after a hit
+        this.scene.unregisterBeforeRender(updateFunction);
+        projectile.dispose();
+        if (trail && !trail.isDisposed()) {
+          trail.dispose();
+        }
+      }
+    );
+
+    // Update function for projectile movement and tracking
+    const updateFunction = () => {
+      // Check if projectile is too far away and dispose if needed
+      if (projectile.position.subtract(this.camera.position).length() > 100) {
+        this.scene.unregisterBeforeRender(updateFunction);
+        if (trail && !trail.isDisposed()) {
+          trail.dispose();
+        }
+        if (projectile && !projectile.isDisposed()) {
+          projectile.dispose();
+        }
+      }
+    };
+
+    // Register the update function
+    this.scene.registerBeforeRender(updateFunction);
+
+    // Destroy projectile after 3 seconds as a backup
     setTimeout(() => {
+      this.scene.unregisterBeforeRender(updateFunction);
+      if (trail && !trail.isDisposed()) {
+        trail.dispose();
+      }
       if (projectile && !projectile.isDisposed()) {
         projectile.dispose();
       }
-    }, 2000);
+    }, 3000);
   }
 
-  private getForwardDirection(): any {
-    if (!BABYLON || !this.camera) {
-      return { normalize: () => ({ scale: () => ({}) }) };
+  /**
+   * Apply damage to a player
+   */
+  private damagePlayer(playerId: string, damage: number): void {
+    // Find the player in other players list
+    const playerToUpdate = this.players.get(playerId);
+    if (!playerToUpdate || !playerToUpdate.metadata) return;
+
+    const currentHealth = playerToUpdate.metadata.health;
+    const newHealth = Math.max(0, currentHealth - damage);
+
+    // Update the player's health locally
+    playerToUpdate.metadata.health = newHealth;
+
+    // If player has no health left, it's a kill
+    if (newHealth <= 0) {
+      // Increment local player kills
+      if (this.localPlayer) {
+        this.localPlayer.kills += 1;
+      }
+
+      // Show kill effect
+      this.showKillEffect(playerToUpdate.position);
+
+      // Respawn player after a delay
+      setTimeout(() => {
+        if (playerToUpdate && !playerToUpdate.isDisposed()) {
+          playerToUpdate.metadata.health = this.settings.maxHealth;
+
+          // Move the player to a random position
+          const respawnPos = this.getRandomSpawnPosition();
+          playerToUpdate.position = new BABYLON.Vector3(
+            respawnPos.x,
+            respawnPos.y + 1,
+            respawnPos.z
+          );
+        }
+      }, this.settings.respawnTime);
     }
 
-    // Get forward direction directly from the camera
-    const forward = this.camera.getDirection(new BABYLON.Vector3(0, 0, 1));
-    return forward.normalize();
+    // Notify the server about the damage
+    this.emitPlayerDamage(playerId, newHealth);
+  }
+
+  /**
+   * Show an effect when a player is killed
+   */
+  private showKillEffect(position: any): void {
+    if (!BABYLON || !this.scene) return;
+
+    // Create explosion particle system
+    const explosion = new BABYLON.ParticleSystem("explosion", 100, this.scene);
+    explosion.particleTexture = new BABYLON.Texture(
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+      this.scene
+    );
+    explosion.emitter = position;
+    explosion.minEmitBox = new BABYLON.Vector3(-0.5, -0.5, -0.5);
+    explosion.maxEmitBox = new BABYLON.Vector3(0.5, 0.5, 0.5);
+    explosion.color1 = new BABYLON.Color4(1, 0.5, 0, 1);
+    explosion.color2 = new BABYLON.Color4(1, 0.2, 0, 1);
+    explosion.colorDead = new BABYLON.Color4(0, 0, 0, 0);
+    explosion.minSize = 0.3;
+    explosion.maxSize = 0.8;
+    explosion.minLifeTime = 0.3;
+    explosion.maxLifeTime = 1.5;
+    explosion.emitRate = 300;
+    explosion.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
+    explosion.gravity = new BABYLON.Vector3(0, -9.81, 0);
+    explosion.direction1 = new BABYLON.Vector3(-1, 8, -1);
+    explosion.direction2 = new BABYLON.Vector3(1, 8, 1);
+    explosion.minAngularSpeed = 0;
+    explosion.maxAngularSpeed = Math.PI;
+    explosion.minEmitPower = 1;
+    explosion.maxEmitPower = 3;
+    explosion.updateSpeed = 0.01;
+
+    // Start the particle system
+    explosion.start();
+
+    // Stop and dispose after 2 seconds
+    setTimeout(() => {
+      explosion.stop();
+      setTimeout(() => {
+        explosion.dispose();
+      }, 2000);
+    }, 300);
+  }
+
+  /**
+   * Send player damage to the server
+   */
+  private async emitPlayerDamage(
+    playerId: string,
+    newHealth: number
+  ): Promise<void> {
+    try {
+      // Dynamically import to avoid circular dependencies
+      const { updatePlayerHealth, incrementPlayerKills } = await import(
+        "@/lib/supabase/client"
+      );
+
+      // Update the player's health on the server
+      await updatePlayerHealth(playerId, newHealth);
+
+      // If the player died, update the kill count for the local player
+      if (newHealth <= 0 && this.localPlayer) {
+        await incrementPlayerKills(this.localPlayer.id);
+      }
+    } catch (err) {
+      console.error("Failed to update player damage on server:", err);
+    }
+  }
+
+  /**
+   * Get a random spawn position for respawning players
+   */
+  private getRandomSpawnPosition(): any {
+    const spawnRadius = 80; // Half the map size
+    const angle = Math.random() * Math.PI * 2;
+    const distance = Math.random() * spawnRadius;
+
+    return {
+      x: Math.cos(angle) * distance,
+      y: 0, // On the ground
+      z: Math.sin(angle) * distance,
+    };
   }
 
   public setLocalPlayer(player: Player): void {
@@ -591,24 +778,189 @@ export class GameEngine {
     let playerMesh = this.players.get(player.id);
 
     if (!playerMesh) {
-      playerMesh = BABYLON.MeshBuilder.CreateBox(
-        `player-${player.id}`,
-        { width: 1, height: 2, depth: 1 },
+      // Create an android-like player model
+      // First create a parent mesh for the entire player
+      playerMesh = new BABYLON.TransformNode(`player-${player.id}`, this.scene);
+
+      // Create the body (cylinder for torso)
+      const body = BABYLON.MeshBuilder.CreateCylinder(
+        `player-body-${player.id}`,
+        { height: 1.2, diameter: 0.7, tessellation: 16 },
         this.scene
       );
-      const playerMaterial = new BABYLON.StandardMaterial(
+      body.parent = playerMesh;
+      body.position.y = 0.9; // Position relative to parent
+
+      // Create head (sphere)
+      const head = BABYLON.MeshBuilder.CreateSphere(
+        `player-head-${player.id}`,
+        { diameter: 0.5, segments: 16 },
+        this.scene
+      );
+      head.parent = playerMesh;
+      head.position.y = 1.8; // Position on top of body
+
+      // Create limbs
+      // Left arm
+      const leftArm = BABYLON.MeshBuilder.CreateCylinder(
+        `player-leftArm-${player.id}`,
+        { height: 0.8, diameter: 0.2, tessellation: 8 },
+        this.scene
+      );
+      leftArm.parent = playerMesh;
+      leftArm.position = new BABYLON.Vector3(-0.45, 1.2, 0);
+      leftArm.rotation.z = Math.PI / 4; // Angle arm outward
+
+      // Right arm
+      const rightArm = BABYLON.MeshBuilder.CreateCylinder(
+        `player-rightArm-${player.id}`,
+        { height: 0.8, diameter: 0.2, tessellation: 8 },
+        this.scene
+      );
+      rightArm.parent = playerMesh;
+      rightArm.position = new BABYLON.Vector3(0.45, 1.2, 0);
+      rightArm.rotation.z = -Math.PI / 4; // Angle arm outward
+
+      // Left leg
+      const leftLeg = BABYLON.MeshBuilder.CreateCylinder(
+        `player-leftLeg-${player.id}`,
+        { height: 1.0, diameter: 0.25, tessellation: 8 },
+        this.scene
+      );
+      leftLeg.parent = playerMesh;
+      leftLeg.position = new BABYLON.Vector3(-0.25, 0.4, 0);
+
+      // Right leg
+      const rightLeg = BABYLON.MeshBuilder.CreateCylinder(
+        `player-rightLeg-${player.id}`,
+        { height: 1.0, diameter: 0.25, tessellation: 8 },
+        this.scene
+      );
+      rightLeg.parent = playerMesh;
+      rightLeg.position = new BABYLON.Vector3(0.25, 0.4, 0);
+
+      // Face details (eyes for the android)
+      const leftEye = BABYLON.MeshBuilder.CreateSphere(
+        `player-leftEye-${player.id}`,
+        { diameter: 0.08, segments: 8 },
+        this.scene
+      );
+      leftEye.parent = head;
+      leftEye.position = new BABYLON.Vector3(-0.1, 0.05, 0.21);
+
+      const rightEye = BABYLON.MeshBuilder.CreateSphere(
+        `player-rightEye-${player.id}`,
+        { diameter: 0.08, segments: 8 },
+        this.scene
+      );
+      rightEye.parent = head;
+      rightEye.position = new BABYLON.Vector3(0.1, 0.05, 0.21);
+
+      // Create materials
+      const playerColor = this.getPlayerColor(player.name);
+
+      // Main body material
+      const bodyMaterial = new BABYLON.StandardMaterial(
         `playerMaterial-${player.id}`,
         this.scene
       );
-      playerMaterial.diffuseColor = this.getPlayerColor(player.name);
-      playerMesh.material = playerMaterial;
+      bodyMaterial.diffuseColor = playerColor;
+      bodyMaterial.specularColor = new BABYLON.Color3(0.3, 0.3, 0.3);
+      bodyMaterial.emissiveColor = playerColor.scale(0.2); // Subtle glow
+      body.material = bodyMaterial;
+      head.material = bodyMaterial;
+      leftArm.material = bodyMaterial;
+      rightArm.material = bodyMaterial;
+      leftLeg.material = bodyMaterial;
+      rightLeg.material = bodyMaterial;
+
+      // Eye material (glowing)
+      const eyeMaterial = new BABYLON.StandardMaterial(
+        `eyeMaterial-${player.id}`,
+        this.scene
+      );
+      eyeMaterial.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.8);
+      eyeMaterial.emissiveColor = new BABYLON.Color3(0.8, 0.8, 1.0); // Bright glow
+      eyeMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
+      leftEye.material = eyeMaterial;
+      rightEye.material = eyeMaterial;
+
+      // Create a physics impostor for the player to enable bullet collisions
+      const playerImpostor = BABYLON.MeshBuilder.CreateBox(
+        `playerCollider-${player.id}`,
+        { width: 0.7, height: 2, depth: 0.7 },
+        this.scene
+      );
+      playerImpostor.parent = playerMesh;
+      playerImpostor.position.y = 1; // Center of the player model
+      playerImpostor.visibility = 0; // Make it invisible
+
+      // Add physics to the player for collision
+      playerImpostor.physicsImpostor = new BABYLON.PhysicsImpostor(
+        playerImpostor,
+        BABYLON.PhysicsImpostor.BoxImpostor,
+        { mass: 0, restitution: 0.2 },
+        this.scene
+      );
+
+      // Store player metadata
+      playerImpostor.metadata = {
+        playerId: player.id,
+        playerName: player.name,
+        health: this.settings.maxHealth,
+        isHitBox: true,
+      };
+
+      // Store animation references
+      playerMesh.metadata = {
+        playerId: player.id,
+        playerName: player.name,
+        health: this.settings.maxHealth,
+        leftArm,
+        rightArm,
+        leftLeg,
+        rightLeg,
+        head,
+      };
+
       this.players.set(player.id, playerMesh);
     }
 
+    // Update position and rotation
+    // Important: place directly on the ground (y=0) instead of y + 1
     playerMesh.position.x = player.position.x;
-    playerMesh.position.y = player.position.y + 1; // Center the mesh
+    playerMesh.position.y = 0; // Place directly on ground
     playerMesh.position.z = player.position.z;
     playerMesh.rotation.y = player.rotation.y;
+
+    // Update crouching state - scale the model if crouching
+    const scale = player.isCrouching ? 0.5 : 1;
+    playerMesh.scaling.y = scale;
+
+    // Animate walking if the player is moving
+    if (playerMesh.metadata && player.velocity) {
+      const isMoving =
+        Math.abs(player.velocity.x) > 0.1 || Math.abs(player.velocity.z) > 0.1;
+
+      if (isMoving) {
+        // Simple walking animation by rotating the limbs
+        const time = Date.now() / 200;
+        const leftLeg = playerMesh.metadata.leftLeg;
+        const rightLeg = playerMesh.metadata.rightLeg;
+        const leftArm = playerMesh.metadata.leftArm;
+        const rightArm = playerMesh.metadata.rightArm;
+
+        if (leftLeg && rightLeg) {
+          leftLeg.rotation.x = Math.sin(time) * 0.5;
+          rightLeg.rotation.x = Math.sin(time + Math.PI) * 0.5;
+        }
+
+        if (leftArm && rightArm) {
+          leftArm.rotation.x = Math.sin(time + Math.PI) * 0.3;
+          rightArm.rotation.x = Math.sin(time) * 0.3;
+        }
+      }
+    }
   }
 
   private getPlayerColor(name: string): any {
@@ -669,11 +1021,8 @@ export class GameEngine {
     // Create a better looking ground
     this.createGround();
 
-    // Create buildings with better colors
-    this.createBuildings();
-
-    // Create platforms for jumping
-    this.createPlatforms();
+    // Initialize map objects from server or create defaults
+    this.initializeMapObjects();
 
     // Create neon lights but more of them and brighter
     this.createNeonLights();
@@ -692,6 +1041,178 @@ export class GameEngine {
     ambientLight.intensity = 0.8; // Stronger intensity
     ambientLight.diffuse = new BABYLON.Color3(0.5, 0.5, 0.6);
     ambientLight.specular = new BABYLON.Color3(0.7, 0.7, 0.8);
+  }
+
+  /**
+   * Initialize map objects - either load from server or create defaults
+   */
+  private async initializeMapObjects() {
+    try {
+      // Import the sendMapObject and getMapObjects functions dynamically
+      // to avoid circular dependencies
+      const { getMapObjects, sendMapObject } = await import(
+        "@/lib/supabase/client"
+      );
+
+      // Try to get existing map objects from the server
+      const response = await getMapObjects();
+
+      if (response.data && response.data.length > 0) {
+        console.log(`Loaded ${response.data.length} map objects from server`);
+
+        // Update map objects from server data
+        response.data.forEach((item: any) => {
+          const mapObject = {
+            id: item.id,
+            type: item.type as "platform" | "building" | "light",
+            position: {
+              x: item.position_x,
+              y: item.position_y,
+              z: item.position_z,
+            },
+            rotation: {
+              x: item.rotation_x,
+              y: item.rotation_y,
+              z: item.rotation_z,
+            },
+            scaling: {
+              x: item.scaling_x,
+              y: item.scaling_y,
+              z: item.scaling_z,
+            },
+            color: item.color,
+            lastUpdated: new Date(item.last_updated).getTime(),
+          };
+
+          this.updateMapObject(mapObject);
+        });
+      } else {
+        console.log("No map objects found, creating defaults");
+
+        // Create default map objects
+        const defaultObjects = this.createDefaultMapObjects();
+
+        // Save them to the server
+        for (const obj of defaultObjects) {
+          try {
+            await sendMapObject(obj);
+            this.updateMapObject(obj);
+          } catch (err) {
+            console.error("Failed to save map object:", err);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Error initializing map objects:", err);
+
+      // Fallback to creating buildings and platforms locally if server fails
+      this.createBuildings();
+      this.createPlatforms();
+    }
+  }
+
+  /**
+   * Create default map objects when none exist on the server
+   */
+  private createDefaultMapObjects() {
+    const objects = [];
+    const { v4: uuidv4 } = require("uuid");
+
+    // Create platform objects
+    const platformPositions = [
+      { x: 10, y: 2, z: 10 },
+      { x: -15, y: 4, z: 15 },
+      { x: 20, y: 6, z: -10 },
+      { x: -25, y: 8, z: -20 },
+      { x: 30, y: 10, z: 25 },
+      { x: 15, y: 5, z: 30 },
+      { x: -30, y: 7, z: -15 },
+      { x: 0, y: 12, z: 40 },
+      { x: 0, y: 8, z: -40 },
+      { x: -40, y: 6, z: 0 },
+      { x: 40, y: 4, z: 0 },
+    ];
+
+    // Platform colors
+    const platformColors = [
+      "#ff3366", // Pink
+      "#33ccff", // Cyan
+      "#cc33ff", // Purple
+      "#ffcc33", // Yellow
+      "#33ff99", // Green
+    ];
+
+    // Create platforms
+    platformPositions.forEach((pos, index) => {
+      objects.push({
+        id: uuidv4(),
+        type: "platform" as "platform",
+        position: { x: pos.x, y: pos.y, z: pos.z },
+        rotation: { x: 0, y: 0, z: 0 },
+        scaling: { x: 1, y: 1, z: 1 },
+        color: platformColors[index % platformColors.length],
+        lastUpdated: Date.now(),
+      });
+    });
+
+    // Create building objects
+    for (let i = 0; i < 20; i++) {
+      const height = 5 + Math.random() * 15;
+      const width = 3 + Math.random() * 7;
+      const depth = 3 + Math.random() * 7;
+
+      const posX = (Math.random() - 0.5) * 160;
+      const posZ = (Math.random() - 0.5) * 160;
+
+      // Don't create buildings too close to the spawn area
+      if (Math.abs(posX) < 20 && Math.abs(posZ) < 20) continue;
+
+      // Building colors
+      const buildingColors = [
+        "#336699", // Blue
+        "#993366", // Purple
+        "#669933", // Green
+        "#996633", // Orange
+      ];
+
+      objects.push({
+        id: uuidv4(),
+        type: "building" as "building",
+        position: { x: posX, y: height / 2, z: posZ },
+        rotation: { x: 0, y: Math.random() * Math.PI * 2, z: 0 },
+        scaling: { x: width / 4, y: height / 10, z: depth / 4 },
+        color:
+          buildingColors[Math.floor(Math.random() * buildingColors.length)],
+        lastUpdated: Date.now(),
+      });
+    }
+
+    // Create light objects
+    const colors = [
+      "#ff3366", // Pink
+      "#33ccff", // Cyan
+      "#cc33ff", // Purple
+      "#ffcc33", // Yellow
+      "#33ff99", // Green
+    ];
+
+    for (let i = 0; i < 50; i++) {
+      const posX = (Math.random() - 0.5) * 160;
+      const posY = 0.5 + Math.random() * 20;
+      const posZ = (Math.random() - 0.5) * 160;
+
+      objects.push({
+        id: uuidv4(),
+        type: "light" as "light",
+        position: { x: posX, y: posY, z: posZ },
+        rotation: { x: 0, y: 0, z: 0 },
+        scaling: { x: 1, y: 1, z: 1 },
+        color: colors[Math.floor(Math.random() * colors.length)],
+        lastUpdated: Date.now(),
+      });
+    }
+
+    return objects;
   }
 
   private createGround(): void {
@@ -1139,5 +1660,18 @@ export class GameEngine {
       objectMesh.scaling.y = mapObject.scaling.y;
       objectMesh.scaling.z = mapObject.scaling.z;
     }
+  }
+
+  /**
+   * Get the direction where the camera is looking
+   */
+  private getForwardDirection(): any {
+    if (!BABYLON || !this.camera) {
+      return { normalize: () => ({ scale: () => ({}) }) };
+    }
+
+    // Get forward direction directly from the camera
+    const forward = this.camera.getDirection(new BABYLON.Vector3(0, 0, 1));
+    return forward.normalize();
   }
 }
