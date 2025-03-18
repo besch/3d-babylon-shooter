@@ -331,19 +331,19 @@ export class GameEngine {
     };
 
     // Handle jumping and crouching
-    this.scene.onKeyboardObservable.add((kbInfo) => {
+    this.scene.onKeyboardObservable.add((kbInfo: any) => {
       if (!this.localPlayer) return;
 
       switch (kbInfo.type) {
         case BABYLON.KeyboardEventTypes.KEYDOWN:
           if (kbInfo.event.key === " " && !this.localPlayer.isJumping) {
             this.jump();
-          } else if (kbInfo.event.key === "Control") {
+          } else if (kbInfo.event.key === "Shift") {
             this.crouch(true);
           }
           break;
         case BABYLON.KeyboardEventTypes.KEYUP:
-          if (kbInfo.event.key === "Control") {
+          if (kbInfo.event.key === "Shift") {
             this.crouch(false);
           }
           break;
@@ -576,32 +576,128 @@ export class GameEngine {
     if (!this.scene) return;
 
     console.log("Creating cyberpunk map");
-    // Create buildings
+
+    // Create a better looking ground
+    this.createGround();
+
+    // Create buildings with better colors
     this.createBuildings();
 
-    // Create neon lights
+    // Create platforms for jumping
+    this.createPlatforms();
+
+    // Create neon lights but more of them and brighter
     this.createNeonLights();
 
-    // Create fog for cyberpunk atmosphere
+    // Create a lighterr fog for cyberpunk atmosphere
     this.scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-    this.scene.fogDensity = 0.01;
-    this.scene.fogColor = new BABYLON.Color3(0.1, 0.1, 0.2);
+    this.scene.fogDensity = 0.005; // Reduced fog density
+    this.scene.fogColor = new BABYLON.Color3(0.2, 0.2, 0.3); // Lighter fog color
+
+    // Add a stronger ambient light
+    const ambientLight = new BABYLON.HemisphericLight(
+      "ambientLight",
+      new BABYLON.Vector3(0, 1, 0),
+      this.scene
+    );
+    ambientLight.intensity = 0.8; // Stronger intensity
+    ambientLight.diffuse = new BABYLON.Color3(0.5, 0.5, 0.6);
+    ambientLight.specular = new BABYLON.Color3(0.7, 0.7, 0.8);
+  }
+
+  private createGround(): void {
+    if (!BABYLON || !this.scene) return;
+
+    // Create a larger ground with a more interesting material
+    this.ground = BABYLON.MeshBuilder.CreateGround(
+      "ground",
+      { width: 200, height: 200 },
+      this.scene
+    );
+    this.ground.checkCollisions = true;
+
+    const groundMaterial = new BABYLON.StandardMaterial(
+      "groundMaterial",
+      this.scene
+    );
+    groundMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.4, 0.5); // Blueish gray
+    groundMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.3);
+    groundMaterial.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.1);
+
+    // Try to create a grid pattern with a procedural texture
+    try {
+      // Create a grid procedural texture
+      const gridSize = 1.0;
+      const gridTexture = new BABYLON.DynamicTexture(
+        "gridTexture",
+        { width: 512, height: 512 },
+        this.scene
+      );
+      const ctx = gridTexture.getContext();
+
+      // Draw grid lines
+      ctx.fillStyle = "rgb(77, 102, 128)"; // Background color
+      ctx.fillRect(0, 0, 512, 512);
+
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgb(0, 180, 255)"; // Line color
+
+      // Draw major grid lines
+      ctx.beginPath();
+      for (let i = 0; i <= 512; i += 64) {
+        // Vertical lines
+        ctx.moveTo(i, 0);
+        ctx.lineTo(i, 512);
+
+        // Horizontal lines
+        ctx.moveTo(0, i);
+        ctx.lineTo(512, i);
+      }
+      ctx.stroke();
+
+      // Draw minor grid lines
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      for (let i = 0; i <= 512; i += 32) {
+        if (i % 64 !== 0) {
+          // Skip major gridlines
+          // Vertical lines
+          ctx.moveTo(i, 0);
+          ctx.lineTo(i, 512);
+
+          // Horizontal lines
+          ctx.moveTo(0, i);
+          ctx.lineTo(512, i);
+        }
+      }
+      ctx.stroke();
+
+      gridTexture.update();
+
+      // Apply the texture to the ground material
+      groundMaterial.diffuseTexture = gridTexture;
+      groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+    } catch (e) {
+      console.log("Failed to create grid texture, using plain material", e);
+    }
+
+    this.ground.material = groundMaterial;
   }
 
   private createBuildings(): void {
     if (!BABYLON || !this.scene) return;
 
-    // Create multiple buildings with different heights
+    // Create multiple buildings with different heights and colors
     for (let i = 0; i < 20; i++) {
       const height = 5 + Math.random() * 15;
       const width = 3 + Math.random() * 7;
       const depth = 3 + Math.random() * 7;
 
-      const posX = (Math.random() - 0.5) * 80;
-      const posZ = (Math.random() - 0.5) * 80;
+      const posX = (Math.random() - 0.5) * 160;
+      const posZ = (Math.random() - 0.5) * 160;
 
       // Don't create buildings too close to the spawn area
-      if (Math.abs(posX) < 10 && Math.abs(posZ) < 10) continue;
+      if (Math.abs(posX) < 20 && Math.abs(posZ) < 20) continue;
 
       const building = BABYLON.MeshBuilder.CreateBox(
         `building-${i}`,
@@ -618,9 +714,33 @@ export class GameEngine {
         this.scene
       );
 
-      // Cyberpunk style - dark buildings with emissive windows
-      buildingMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.15);
-      buildingMaterial.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.1);
+      // Brighter cyberpunk style buildings
+      // Randomly select a color scheme
+      const colorSchemes = [
+        {
+          diffuse: new BABYLON.Color3(0.2, 0.4, 0.6),
+          emissive: new BABYLON.Color3(0.1, 0.2, 0.4),
+        }, // Blue
+        {
+          diffuse: new BABYLON.Color3(0.6, 0.2, 0.5),
+          emissive: new BABYLON.Color3(0.3, 0.1, 0.25),
+        }, // Purple
+        {
+          diffuse: new BABYLON.Color3(0.5, 0.6, 0.2),
+          emissive: new BABYLON.Color3(0.25, 0.3, 0.1),
+        }, // Green
+        {
+          diffuse: new BABYLON.Color3(0.6, 0.4, 0.2),
+          emissive: new BABYLON.Color3(0.3, 0.2, 0.1),
+        }, // Orange
+      ];
+
+      const colorScheme =
+        colorSchemes[Math.floor(Math.random() * colorSchemes.length)];
+      buildingMaterial.diffuseColor = colorScheme.diffuse;
+      buildingMaterial.emissiveColor = colorScheme.emissive;
+      buildingMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+
       building.material = buildingMaterial;
 
       // Add collision detection to buildings
@@ -628,10 +748,60 @@ export class GameEngine {
     }
   }
 
+  private createPlatforms(): void {
+    if (!BABYLON || !this.scene) return;
+
+    // Create various platforms for jumping across the map
+    const platformPositions = [
+      { x: 10, y: 2, z: 10 },
+      { x: -15, y: 4, z: 15 },
+      { x: 20, y: 6, z: -10 },
+      { x: -25, y: 8, z: -20 },
+      { x: 30, y: 10, z: 25 },
+      { x: 15, y: 5, z: 30 },
+      { x: -30, y: 7, z: -15 },
+      { x: 0, y: 12, z: 40 },
+      { x: 0, y: 8, z: -40 },
+      { x: -40, y: 6, z: 0 },
+      { x: 40, y: 4, z: 0 },
+    ];
+
+    platformPositions.forEach((pos, index) => {
+      const platform = BABYLON.MeshBuilder.CreateBox(
+        `platform-${index}`,
+        { width: 5, height: 0.5, depth: 5 },
+        this.scene
+      );
+
+      platform.position = new BABYLON.Vector3(pos.x, pos.y, pos.z);
+      platform.checkCollisions = true;
+
+      const platformMaterial = new BABYLON.StandardMaterial(
+        `platformMaterial-${index}`,
+        this.scene
+      );
+
+      // Neon-colored platforms
+      const platformColors = [
+        new BABYLON.Color3(1, 0.2, 0.7), // Pink
+        new BABYLON.Color3(0.2, 0.8, 1), // Cyan
+        new BABYLON.Color3(0.8, 0.2, 1), // Purple
+        new BABYLON.Color3(1, 0.8, 0.2), // Yellow
+        new BABYLON.Color3(0.2, 1, 0.5), // Green
+      ];
+
+      const colorIndex = index % platformColors.length;
+      platformMaterial.diffuseColor = platformColors[colorIndex];
+      platformMaterial.emissiveColor = platformColors[colorIndex].scale(0.5);
+      platformMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
+      platform.material = platformMaterial;
+    });
+  }
+
   private createNeonLights(): void {
     if (!BABYLON || !this.scene) return;
 
-    // Create neon light sources around the map
+    // Create more neon light sources with higher intensity
     const colors = [
       new BABYLON.Color3(1, 0.2, 0.7), // Pink
       new BABYLON.Color3(0.2, 0.8, 1), // Cyan
@@ -640,15 +810,16 @@ export class GameEngine {
       new BABYLON.Color3(0.2, 1, 0.5), // Green
     ];
 
-    for (let i = 0; i < 30; i++) {
-      const posX = (Math.random() - 0.5) * 80;
-      const posY = 0.5 + Math.random() * 10;
-      const posZ = (Math.random() - 0.5) * 80;
+    // Create more lights
+    for (let i = 0; i < 50; i++) {
+      const posX = (Math.random() - 0.5) * 160;
+      const posY = 0.5 + Math.random() * 20;
+      const posZ = (Math.random() - 0.5) * 160;
 
       const colorIndex = Math.floor(Math.random() * colors.length);
       const color = colors[colorIndex];
 
-      // Create a small neon light source
+      // Create a brighter neon light source
       const light = new BABYLON.PointLight(
         `neonLight-${i}`,
         new BABYLON.Vector3(posX, posY, posZ),
@@ -657,13 +828,13 @@ export class GameEngine {
 
       light.diffuse = color;
       light.specular = color;
-      light.intensity = 0.5 + Math.random() * 0.5;
-      light.range = 10 + Math.random() * 10;
+      light.intensity = 0.7 + Math.random() * 0.7; // Higher intensity
+      light.range = 15 + Math.random() * 15; // Larger range
 
       // Create a small emissive sphere for the light source
       const sphere = BABYLON.MeshBuilder.CreateSphere(
         `neonSphere-${i}`,
-        { diameter: 0.5 },
+        { diameter: 0.8 }, // Slightly larger
         this.scene
       );
 
@@ -678,7 +849,7 @@ export class GameEngine {
       sphereMaterial.diffuseColor = color;
       sphereMaterial.emissiveColor = color;
       sphereMaterial.specularColor = color;
-      sphereMaterial.alpha = 0.7;
+      sphereMaterial.alpha = 0.8;
       sphere.material = sphereMaterial;
     }
   }
@@ -708,24 +879,36 @@ export class GameEngine {
   private jump(): void {
     if (!this.localPlayer || !this.camera) return;
 
+    // Only jump if not already jumping
+    if (this.localPlayer.isJumping) return;
+
     this.localPlayer.isJumping = true;
     this.localPlayer.velocity.y = this.settings.jumpForce;
-    this.camera.position.y += this.settings.jumpForce;
 
-    // Apply gravity
-    setTimeout(() => {
-      if (this.localPlayer) {
-        this.localPlayer.velocity.y -= this.settings.gravity * 0.016; // 60fps
-        this.camera.position.y += this.localPlayer.velocity.y * 0.016;
+    // Create a gravity effect by using a recurring function
+    const applyGravity = () => {
+      if (!this.localPlayer || !this.camera) return;
 
-        // Check if landed
-        if (this.camera.position.y <= 1.8) {
-          this.camera.position.y = 1.8;
-          this.localPlayer.isJumping = false;
-          this.localPlayer.velocity.y = 0;
-        }
+      // Apply velocity to position
+      this.camera.position.y += this.localPlayer.velocity.y * 0.016; // 60fps
+
+      // Apply gravity to velocity
+      this.localPlayer.velocity.y -= this.settings.gravity * 0.016;
+
+      // Check if landed
+      if (this.camera.position.y <= 1.8) {
+        this.camera.position.y = 1.8;
+        this.localPlayer.isJumping = false;
+        this.localPlayer.velocity.y = 0;
+        return; // Stop the gravity effect
       }
-    }, 16);
+
+      // Continue applying gravity
+      requestAnimationFrame(applyGravity);
+    };
+
+    // Start the gravity effect
+    requestAnimationFrame(applyGravity);
   }
 
   private crouch(isCrouching: boolean): void {

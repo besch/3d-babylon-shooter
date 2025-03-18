@@ -222,7 +222,7 @@ export function GameContainer() {
 
       // Create a local player
       addDebugMessage("Creating local player");
-      const localPlayer: Player = {
+      const newPlayer: Player = {
         id: uuidv4(),
         name: playerName,
         health: 100,
@@ -237,14 +237,24 @@ export function GameContainer() {
         lastUpdated: Date.now(),
       };
 
-      engine.setLocalPlayer(localPlayer);
+      // Set the local player in the component state
+      setLocalPlayer(newPlayer);
 
-      // Create some dummy players for now
-      addDebugMessage("Creating dummy players");
-      const dummyPlayers = generateDummyPlayers(3, localPlayer.name);
-      dummyPlayers.forEach((player) => {
-        engine.updatePlayer(player);
-      });
+      // Set the local player in the game engine
+      engine.setLocalPlayer(newPlayer);
+
+      // Register initial player position with Supabase
+      addDebugMessage("Registering player with server");
+      try {
+        await sendPlayerUpdate(newPlayer);
+        addDebugMessage("Player registered successfully");
+      } catch (err) {
+        addDebugMessage("Warning: Failed to register player with server");
+        console.warn("Failed to register player:", err);
+      }
+
+      // Skip creating dummy players in multiplayer mode
+      // as we'll get real players from Supabase
 
       // Enable debug layer if debug mode is on
       if (isDebugMode) {
@@ -271,6 +281,7 @@ export function GameContainer() {
     }
     setIsPlaying(false);
     setDebug([]);
+    setLocalPlayer(null); // Clear the local player when stopping the game
   };
 
   const generateDummyPlayers = (
