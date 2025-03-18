@@ -6,6 +6,11 @@ import { Button } from "@/components/ui/button";
 import { GameSettings, Player, TechCompany } from "@/game/types";
 // Import the GameEngine type but import the actual engine dynamically
 import type { GameEngine } from "@/game/engine";
+import {
+  getSupabaseClient,
+  listenForPlayerUpdates,
+  sendPlayerUpdate,
+} from "@/lib/supabase/client";
 
 const TECH_COMPANIES: TechCompany[] = [
   "Google",
@@ -29,6 +34,9 @@ export function GameContainer() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [debug, setDebug] = useState<string[]>([]);
+  const [otherPlayers, setOtherPlayers] = useState<Player[]>([]);
+  const [localPlayer, setLocalPlayer] = useState<Player | null>(null);
+  const supabaseRef = useRef<any>(null);
 
   // Add a debug message
   const addDebugMessage = (message: string) => {
@@ -68,6 +76,96 @@ export function GameContainer() {
       };
     }
   }, []);
+
+  // Initialize Supabase client
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      supabaseRef.current = getSupabaseClient();
+    }
+  }, []);
+
+  // Set up realtime subscription
+  useEffect(() => {
+    if (!supabaseRef.current) return;
+
+    let subscription: any;
+    listenForPlayerUpdates((payload) => {
+      if (payload.new && payload.new.id !== localPlayer?.id) {
+        const player: Player = {
+          id: payload.new.id,
+          name: payload.new.name,
+          health: payload.new.health,
+          position: {
+            x: payload.new.position_x,
+            y: payload.new.position_y,
+            z: payload.new.position_z,
+          },
+          rotation: {
+            x: payload.new.rotation_x,
+            y: payload.new.rotation_y,
+            z: payload.new.rotation_z,
+          },
+          velocity: {
+            x: payload.new.velocity_x,
+            y: payload.new.velocity_y,
+            z: payload.new.velocity_z,
+          },
+          isJumping: payload.new.is_jumping,
+          isCrouching: payload.new.is_crouching,
+          playerClass: payload.new.player_class,
+          kills: payload.new.kills,
+          deaths: payload.new.deaths,
+          lastUpdated: new Date(payload.new.last_updated).getTime(),
+        };
+        setOtherPlayers((prev) => {
+          const filtered = prev.filter((p) => p.id !== player.id);
+          return [...filtered, player];
+        });
+      }
+    }).then((sub) => {
+      subscription = sub;
+    });
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, [localPlayer?.id]);
+
+  // Update player position periodically
+  useEffect(() => {
+    if (!isPlaying || !localPlayer || !engineRef.current) return;
+
+    const interval = setInterval(() => {
+      if (engineRef.current) {
+        const camera = engineRef.current.getCamera();
+        if (camera) {
+          localPlayer.position = {
+            x: camera.position.x,
+            y: camera.position.y,
+            z: camera.position.z,
+          };
+          localPlayer.rotation = {
+            x: camera.rotation.x,
+            y: camera.rotation.y,
+            z: camera.rotation.z,
+          };
+          localPlayer.lastUpdated = Date.now();
+          sendPlayerUpdate(localPlayer);
+        }
+      }
+    }, 100); // Update every 100ms
+
+    return () => clearInterval(interval);
+  }, [isPlaying, localPlayer]);
+
+  // Update other players in the game engine
+  useEffect(() => {
+    if (!engineRef.current) return;
+
+    otherPlayers.forEach((player) => {
+      engineRef.current?.updatePlayer(player);
+    });
+  }, [otherPlayers]);
 
   const startGame = async () => {
     if (!canvasRef.current) {
@@ -130,8 +228,13 @@ export function GameContainer() {
         health: 100,
         position: { x: 0, y: 0, z: 0 },
         rotation: { x: 0, y: 0, z: 0 },
+        velocity: { x: 0, y: 0, z: 0 },
+        isJumping: false,
+        isCrouching: false,
+        playerClass: "Soldier",
         kills: 0,
         deaths: 0,
+        lastUpdated: Date.now(),
       };
 
       engine.setLocalPlayer(localPlayer);
@@ -191,15 +294,20 @@ export function GameContainer() {
         position: {
           x: (Math.random() - 0.5) * 20,
           y: 0,
-          z: (Math.random() - 0.5) * 20 + 10, // Position players ahead of the local player
+          z: (Math.random() - 0.5) * 20 + 10,
         },
         rotation: {
           x: 0,
           y: Math.random() * Math.PI * 2,
           z: 0,
         },
+        velocity: { x: 0, y: 0, z: 0 },
+        isJumping: false,
+        isCrouching: false,
+        playerClass: "Soldier",
         kills: 0,
         deaths: 0,
+        lastUpdated: Date.now(),
       });
     }
 

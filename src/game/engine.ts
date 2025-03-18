@@ -38,6 +38,8 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   respawnTime: 3000, // 3 seconds
   recoilForce: 0.5,
   projectileSpeed: 50,
+  jumpForce: 5,
+  gravity: 9.81,
 };
 
 export class GameEngine {
@@ -321,12 +323,32 @@ export class GameEngine {
   private setupInputHandling(): void {
     if (!this.scene) return;
 
+    // Handle shooting
     this.scene.onPointerDown = (evt: any) => {
       if (evt.button === 0) {
-        // Left click
         this.shoot();
       }
     };
+
+    // Handle jumping and crouching
+    this.scene.onKeyboardObservable.add((kbInfo) => {
+      if (!this.localPlayer) return;
+
+      switch (kbInfo.type) {
+        case BABYLON.KeyboardEventTypes.KEYDOWN:
+          if (kbInfo.event.key === " " && !this.localPlayer.isJumping) {
+            this.jump();
+          } else if (kbInfo.event.key === "Control") {
+            this.crouch(true);
+          }
+          break;
+        case BABYLON.KeyboardEventTypes.KEYUP:
+          if (kbInfo.event.key === "Control") {
+            this.crouch(false);
+          }
+          break;
+      }
+    });
 
     // Lock the pointer when clicking in the canvas
     this.scene.onPointerDown = (evt: any) => {
@@ -341,7 +363,6 @@ export class GameEngine {
         }
       }
 
-      // Still handle shooting
       if (evt.button === 0) {
         this.shoot();
       }
@@ -392,6 +413,7 @@ export class GameEngine {
   private createProjectile(): void {
     if (!this.localPlayer || !BABYLON || !this.scene || !this.camera) return;
 
+    // Create projectile
     const projectile = BABYLON.MeshBuilder.CreateSphere(
       "projectile",
       { diameter: 0.1 },
@@ -405,15 +427,18 @@ export class GameEngine {
     projectileMaterial.emissiveColor = new BABYLON.Color3(1, 0, 0);
     projectile.material = projectileMaterial;
 
-    // Position the projectile at the weapon position
+    // Get the exact direction where the camera is looking
     const direction = this.getForwardDirection();
-    projectile.position = new BABYLON.Vector3(
-      this.camera.position.x + direction.x * 0.5,
-      this.camera.position.y - 0.1 + direction.y * 0.5,
-      this.camera.position.z + direction.z * 0.5
-    );
+    console.log("Shooting direction:", direction);
 
-    // Simple projectile motion without physics
+    // Position the projectile directly in front of the camera (centered with the crosshair)
+    projectile.position = new BABYLON.Vector3(
+      this.camera.position.x,
+      this.camera.position.y,
+      this.camera.position.z
+    ).add(direction.scale(1)); // Start 1 unit in front of camera
+
+    // Simple projectile motion
     const speed = this.settings.projectileSpeed;
 
     // Create animation to move the projectile
@@ -433,7 +458,8 @@ export class GameEngine {
       value: projectile.position.clone(),
     });
 
-    const targetPosition = projectile.position.add(direction.scale(speed * 2));
+    // Calculate end position (50 units in front of starting position)
+    const targetPosition = projectile.position.add(direction.scale(50));
 
     keyframes.push({
       frame: frameRate * 2, // 2 seconds
@@ -457,16 +483,13 @@ export class GameEngine {
   }
 
   private getForwardDirection(): any {
-    if (!BABYLON || !this.camera)
+    if (!BABYLON || !this.camera) {
       return { normalize: () => ({ scale: () => ({}) }) };
+    }
 
-    const matrix = new BABYLON.Matrix();
-    this.camera.getWorldMatrix().invertToRef(matrix);
-    const direction = BABYLON.Vector3.TransformNormal(
-      new BABYLON.Vector3(0, 0, 1),
-      matrix
-    );
-    return direction.normalize();
+    // Get forward direction directly from the camera
+    const forward = this.camera.getDirection(new BABYLON.Vector3(0, 0, 1));
+    return forward.normalize();
   }
 
   public setLocalPlayer(player: Player): void {
@@ -665,6 +688,10 @@ export class GameEngine {
     console.log("Debug layer disabled to avoid Inspector issues");
   }
 
+  public getCamera(): any {
+    return this.camera;
+  }
+
   public dispose(): void {
     if (this.engine) {
       console.log("Disposing game engine");
@@ -676,5 +703,35 @@ export class GameEngine {
 
       this.engine.dispose();
     }
+  }
+
+  private jump(): void {
+    if (!this.localPlayer || !this.camera) return;
+
+    this.localPlayer.isJumping = true;
+    this.localPlayer.velocity.y = this.settings.jumpForce;
+    this.camera.position.y += this.settings.jumpForce;
+
+    // Apply gravity
+    setTimeout(() => {
+      if (this.localPlayer) {
+        this.localPlayer.velocity.y -= this.settings.gravity * 0.016; // 60fps
+        this.camera.position.y += this.localPlayer.velocity.y * 0.016;
+
+        // Check if landed
+        if (this.camera.position.y <= 1.8) {
+          this.camera.position.y = 1.8;
+          this.localPlayer.isJumping = false;
+          this.localPlayer.velocity.y = 0;
+        }
+      }
+    }, 16);
+  }
+
+  private crouch(isCrouching: boolean): void {
+    if (!this.localPlayer || !this.camera) return;
+
+    this.localPlayer.isCrouching = isCrouching;
+    this.camera.position.y = isCrouching ? 0.9 : 1.8;
   }
 }
