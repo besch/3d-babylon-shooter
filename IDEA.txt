@@ -1,0 +1,17 @@
+whose commands are already has been run:
+npx create-next-app@latest . --typescript --tailwind --eslint --app --src-dir --import-alias="@/*" --use-npm
+pnpm install jotai zod lucide-react clsx tailwind-merge tailwindcss-animate class-variance-authority shadcn-ui next-safe-action nuqs
+New-Item -ItemType Directory -Path "src/lib/store", "src/lib/utils", "src/types" -Force
+pnpm dlx shadcn@latest init
+pnpm dlx shadcn@latest add button progress dialog tabs input card dialog input label slider tabs select separator
+npm install --save-dev @babylonjs/core
+npm install --save-dev @babylonjs/inspector   
+
+
+
+I want you to create a simple first person shooter game similar to Doom (DOS) or counter-strike 1.6 where you can shoot players in realtime
+every player that connects to the game has to be assigned a name of a big tech company like Google, Facebook, Twitter etc.
+I want  to use babylonjs (if you have in mind better alternative library then use it instead)
+player has to shoot 3 times at another player to kill him
+the shooting has a very big recoil
+think harder to make this game interesting and interactive, the map should be awesome in cypepunk style
