@@ -1,6 +1,25 @@
-import * as BABYLON from "@babylonjs/core";
-import "@babylonjs/inspector";
+// Use conditional imports to avoid document issues during SSR
 import { Player, GameSettings } from "./types";
+
+// Define types to avoid missing BABYLON reference
+let BABYLON: any = null;
+
+// Only initialize on client side
+async function loadBabylonModules() {
+  if (typeof window !== "undefined" && !BABYLON) {
+    try {
+      // Use dynamic import instead of require
+      const core = await import("@babylonjs/core");
+      console.log("Babylon.js core loaded successfully");
+      BABYLON = core;
+      return true;
+    } catch (error) {
+      console.error("Failed to load Babylon.js modules:", error);
+      return false;
+    }
+  }
+  return !!BABYLON;
+}
 
 export const DEFAULT_GAME_SETTINGS: GameSettings = {
   maxHealth: 100,
@@ -11,103 +30,143 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
 };
 
 export class GameEngine {
-  private canvas: HTMLCanvasElement;
-  private engine: BABYLON.Engine;
-  private scene: BABYLON.Scene;
-  private camera: BABYLON.FreeCamera;
-  private light: BABYLON.HemisphericLight;
-  private settings: GameSettings;
+  private canvas!: HTMLCanvasElement;
+  private engine: any;
+  private scene: any;
+  private camera: any;
+  private light: any;
+  private settings!: GameSettings;
   private localPlayer: Player | null = null;
-  private players: Map<string, BABYLON.Mesh> = new Map();
-  private weapons: Map<string, BABYLON.Mesh> = new Map();
-  private ground: BABYLON.Mesh;
-  private recoilAnimation: BABYLON.Animation;
+  private players: Map<string, any> = new Map();
+  private weapons: Map<string, any> = new Map();
+  private ground: any;
+  private recoilAnimation: any;
   private isRecoiling: boolean = false;
+  private initialized: boolean = false;
 
   constructor(
     canvas: HTMLCanvasElement,
     settings: GameSettings = DEFAULT_GAME_SETTINGS
   ) {
+    console.log("GameEngine constructor called");
     this.canvas = canvas;
     this.settings = settings;
-    this.engine = new BABYLON.Engine(canvas, true);
-    this.scene = new BABYLON.Scene(this.engine);
+  }
 
-    // Camera setup
-    this.camera = new BABYLON.FreeCamera(
-      "playerCamera",
-      new BABYLON.Vector3(0, 1.8, 0),
-      this.scene
-    );
-    this.camera.setTarget(new BABYLON.Vector3(0, 1.8, 1));
-    this.camera.attachControl(canvas, true);
-    this.camera.applyGravity = true;
-    this.camera.checkCollisions = true;
-    this.camera.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5);
-    this.camera.minZ = 0.1;
+  async initialize(): Promise<boolean> {
+    // Exit early if not in browser
+    if (typeof window === "undefined") {
+      console.warn(
+        "Cannot initialize GameEngine outside of browser environment"
+      );
+      return false;
+    }
 
-    // Controls
-    this.camera.keysUp.push(87); // W
-    this.camera.keysDown.push(83); // S
-    this.camera.keysLeft.push(65); // A
-    this.camera.keysRight.push(68); // D
+    console.log("Initializing game engine...");
 
-    // Light setup
-    this.light = new BABYLON.HemisphericLight(
-      "light",
-      new BABYLON.Vector3(0, 1, 0),
-      this.scene
-    );
-    this.light.intensity = 0.7;
+    // Load Babylon modules if not loaded
+    const modulesLoaded = await loadBabylonModules();
 
-    // Ground setup
-    this.ground = BABYLON.MeshBuilder.CreateGround(
-      "ground",
-      { width: 100, height: 100 },
-      this.scene
-    );
-    this.ground.checkCollisions = true;
+    if (!modulesLoaded || !BABYLON) {
+      console.error("Failed to load Babylon.js modules");
+      return false;
+    }
 
-    const groundMaterial = new BABYLON.StandardMaterial(
-      "groundMaterial",
-      this.scene
-    );
-    groundMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.3);
-    groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-    this.ground.material = groundMaterial;
+    try {
+      console.log("Creating Babylon.js engine and scene");
+      this.engine = new BABYLON.Engine(this.canvas, true);
+      this.scene = new BABYLON.Scene(this.engine);
 
-    // Recoil animation
-    this.recoilAnimation = new BABYLON.Animation(
-      "recoilAnimation",
-      "rotation.x",
-      30,
-      BABYLON.Animation.ANIMATIONTYPE_FLOAT,
-      BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE
-    );
+      // Camera setup
+      console.log("Setting up camera");
+      this.camera = new BABYLON.FreeCamera(
+        "playerCamera",
+        new BABYLON.Vector3(0, 1.8, 0),
+        this.scene
+      );
+      this.camera.setTarget(new BABYLON.Vector3(0, 1.8, 1));
+      this.camera.attachControl(this.canvas, true);
+      this.camera.applyGravity = true;
+      this.camera.checkCollisions = true;
+      this.camera.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5);
+      this.camera.minZ = 0.1;
 
-    // Create the key frames for the recoil animation
-    const keyFrames = [];
-    keyFrames.push({ frame: 0, value: 0 });
-    keyFrames.push({ frame: 5, value: this.settings.recoilForce });
-    keyFrames.push({ frame: 15, value: 0 });
-    this.recoilAnimation.setKeys(keyFrames);
+      // Controls
+      this.camera.keysUp.push(87); // W
+      this.camera.keysDown.push(83); // S
+      this.camera.keysLeft.push(65); // A
+      this.camera.keysRight.push(68); // D
 
-    // Register render loop
-    this.engine.runRenderLoop(() => {
-      this.scene.render();
-    });
+      // Light setup
+      console.log("Setting up lighting");
+      this.light = new BABYLON.HemisphericLight(
+        "light",
+        new BABYLON.Vector3(0, 1, 0),
+        this.scene
+      );
+      this.light.intensity = 0.7;
 
-    // Resize event handler
-    window.addEventListener("resize", () => {
-      this.engine.resize();
-    });
+      // Ground setup
+      console.log("Creating ground");
+      this.ground = BABYLON.MeshBuilder.CreateGround(
+        "ground",
+        { width: 100, height: 100 },
+        this.scene
+      );
+      this.ground.checkCollisions = true;
 
-    // Input handling
-    this.setupInputHandling();
+      const groundMaterial = new BABYLON.StandardMaterial(
+        "groundMaterial",
+        this.scene
+      );
+      groundMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.3);
+      groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+      this.ground.material = groundMaterial;
+
+      // Recoil animation
+      console.log("Setting up weapon animations");
+      this.recoilAnimation = new BABYLON.Animation(
+        "recoilAnimation",
+        "rotation.x",
+        30,
+        BABYLON.Animation.ANIMATIONTYPE_FLOAT,
+        BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE
+      );
+
+      // Create the key frames for the recoil animation
+      const keyFrames = [];
+      keyFrames.push({ frame: 0, value: 0 });
+      keyFrames.push({ frame: 5, value: this.settings.recoilForce });
+      keyFrames.push({ frame: 15, value: 0 });
+      this.recoilAnimation.setKeys(keyFrames);
+
+      // Register render loop
+      console.log("Starting render loop");
+      this.engine.runRenderLoop(() => {
+        this.scene.render();
+      });
+
+      // Resize event handler
+      window.addEventListener("resize", () => {
+        this.engine.resize();
+      });
+
+      // Input handling
+      this.setupInputHandling();
+
+      console.log("Game engine initialization complete");
+      this.initialized = true;
+      return true;
+    } catch (error) {
+      console.error("Error during game engine initialization:", error);
+      return false;
+    }
   }
 
   private setupInputHandling(): void {
-    this.scene.onPointerDown = (evt) => {
+    if (!this.scene) return;
+
+    this.scene.onPointerDown = (evt: any) => {
       if (evt.button === 0) {
         // Left click
         this.shoot();
@@ -116,7 +175,7 @@ export class GameEngine {
   }
 
   private shoot(): void {
-    if (this.isRecoiling) return;
+    if (this.isRecoiling || !this.scene) return;
 
     // Play recoil animation
     this.isRecoiling = true;
@@ -130,8 +189,8 @@ export class GameEngine {
     this.createProjectile();
   }
 
-  private getOrCreateWeapon(): BABYLON.Mesh {
-    if (!this.localPlayer) return {} as BABYLON.Mesh;
+  private getOrCreateWeapon(): any {
+    if (!this.localPlayer || !BABYLON || !this.scene) return {};
 
     let weapon = this.weapons.get(this.localPlayer.id);
 
@@ -157,7 +216,7 @@ export class GameEngine {
   }
 
   private createProjectile(): void {
-    if (!this.localPlayer) return;
+    if (!this.localPlayer || !BABYLON || !this.scene || !this.camera) return;
 
     const projectile = BABYLON.MeshBuilder.CreateSphere(
       "projectile",
@@ -180,26 +239,53 @@ export class GameEngine {
       this.camera.position.z + direction.z * 0.5
     );
 
-    // Add physics impulse
-    projectile.physicsImpostor = new BABYLON.PhysicsImpostor(
-      projectile,
-      BABYLON.PhysicsImpostor.SphereImpostor,
-      { mass: 1, restitution: 0.9 },
-      this.scene
+    // Simple projectile motion without physics
+    const speed = this.settings.projectileSpeed;
+
+    // Create animation to move the projectile
+    const frameRate = 60;
+    const projectileAnimation = new BABYLON.Animation(
+      "projectileAnimation",
+      "position",
+      frameRate,
+      BABYLON.Animation.ANIMATIONTYPE_VECTOR3,
+      BABYLON.Animation.ANIMATIONLOOPMODE_CONSTANT
     );
 
-    projectile.physicsImpostor.applyImpulse(
-      direction.scale(this.settings.projectileSpeed),
-      projectile.getAbsolutePosition()
-    );
+    // Set keyframes for linear motion
+    const keyframes = [];
+    keyframes.push({
+      frame: 0,
+      value: projectile.position.clone(),
+    });
 
-    // Destroy projectile after 2 seconds
-    setTimeout(() => {
+    const targetPosition = projectile.position.add(direction.scale(speed * 2));
+
+    keyframes.push({
+      frame: frameRate * 2, // 2 seconds
+      value: targetPosition,
+    });
+
+    projectileAnimation.setKeys(keyframes);
+    projectile.animations.push(projectileAnimation);
+
+    // Start animation
+    this.scene.beginAnimation(projectile, 0, frameRate * 2, false, 1, () => {
       projectile.dispose();
+    });
+
+    // Destroy projectile after 2 seconds as a backup
+    setTimeout(() => {
+      if (projectile && !projectile.isDisposed()) {
+        projectile.dispose();
+      }
     }, 2000);
   }
 
-  private getForwardDirection(): BABYLON.Vector3 {
+  private getForwardDirection(): any {
+    if (!BABYLON || !this.camera)
+      return { normalize: () => ({ scale: () => ({}) }) };
+
     const matrix = new BABYLON.Matrix();
     this.camera.getWorldMatrix().invertToRef(matrix);
     const direction = BABYLON.Vector3.TransformNormal(
@@ -214,6 +300,8 @@ export class GameEngine {
   }
 
   public updatePlayer(player: Player): void {
+    if (!BABYLON || !this.scene) return;
+
     let playerMesh = this.players.get(player.id);
 
     if (!playerMesh) {
@@ -237,7 +325,9 @@ export class GameEngine {
     playerMesh.rotation.y = player.rotation.y;
   }
 
-  private getPlayerColor(name: string): BABYLON.Color3 {
+  private getPlayerColor(name: string): any {
+    if (!BABYLON) return {};
+
     switch (name) {
       case "Google":
         return new BABYLON.Color3(0.3, 0.6, 1);
@@ -279,21 +369,16 @@ export class GameEngine {
   }
 
   public enablePhysics(): void {
-    this.scene.enablePhysics(
-      new BABYLON.Vector3(0, -9.81, 0),
-      new BABYLON.CannonJSPlugin()
-    );
-
-    // Add physics to the ground
-    this.ground.physicsImpostor = new BABYLON.PhysicsImpostor(
-      this.ground,
-      BABYLON.PhysicsImpostor.BoxImpostor,
-      { mass: 0, restitution: 0.9 },
-      this.scene
+    // Simplified version that doesn't rely on the physics plugin
+    console.log(
+      "Physics disabled - using simplified projectile motion instead"
     );
   }
 
   public createCyberpunkMap(): void {
+    if (!this.scene) return;
+
+    console.log("Creating cyberpunk map");
     // Create buildings
     this.createBuildings();
 
@@ -307,6 +392,8 @@ export class GameEngine {
   }
 
   private createBuildings(): void {
+    if (!BABYLON || !this.scene) return;
+
     // Create multiple buildings with different heights
     for (let i = 0; i < 20; i++) {
       const height = 5 + Math.random() * 15;
@@ -341,18 +428,12 @@ export class GameEngine {
 
       // Add collision detection to buildings
       building.checkCollisions = true;
-
-      // Add physics
-      building.physicsImpostor = new BABYLON.PhysicsImpostor(
-        building,
-        BABYLON.PhysicsImpostor.BoxImpostor,
-        { mass: 0 },
-        this.scene
-      );
     }
   }
 
   private createNeonLights(): void {
+    if (!BABYLON || !this.scene) return;
+
     // Create neon light sources around the map
     const colors = [
       new BABYLON.Color3(1, 0.2, 0.7), // Pink
@@ -406,10 +487,20 @@ export class GameEngine {
   }
 
   public enableDebugLayer(): void {
-    this.scene.debugLayer.show();
+    if (!this.scene) return;
+
+    try {
+      console.log("Enabling debug layer");
+      this.scene.debugLayer.show();
+    } catch (error) {
+      console.warn("Failed to enable debug layer:", error);
+    }
   }
 
   public dispose(): void {
-    this.engine.dispose();
+    if (this.engine) {
+      console.log("Disposing game engine");
+      this.engine.dispose();
+    }
   }
 }
