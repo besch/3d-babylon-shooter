@@ -418,7 +418,7 @@ export function GameContainer() {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center w-full h-full">
+    <div className="flex flex-col items-center justify-center w-full h-full bg-black">
       {/* Always render the canvas, but hidden when not playing */}
       <div
         className={`absolute w-full h-full ${isPlaying ? "block" : "hidden"}`}
