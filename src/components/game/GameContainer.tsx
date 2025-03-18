@@ -3,13 +3,16 @@
 import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Button } from "@/components/ui/button";
-import { GameSettings, Player, TechCompany } from "@/game/types";
+import { GameSettings, Player, TechCompany, MapObject } from "@/game/types";
 // Import the GameEngine type but import the actual engine dynamically
 import type { GameEngine } from "@/game/engine";
 import {
   getSupabaseClient,
   listenForPlayerUpdates,
   sendPlayerUpdate,
+  getMapObjects,
+  listenForMapObjectUpdates,
+  sendMapObject,
 } from "@/lib/supabase/client";
 
 const TECH_COMPANIES: TechCompany[] = [
@@ -37,6 +40,7 @@ export function GameContainer() {
   const [otherPlayers, setOtherPlayers] = useState<Player[]>([]);
   const [localPlayer, setLocalPlayer] = useState<Player | null>(null);
   const supabaseRef = useRef<any>(null);
+  const [mapObjects, setMapObjects] = useState<MapObject[]>([]);
 
   // Add a debug message
   const addDebugMessage = (message: string) => {
@@ -131,6 +135,79 @@ export function GameContainer() {
     };
   }, [localPlayer?.id]);
 
+  // Set up realtime subscription for map objects
+  useEffect(() => {
+    if (!supabaseRef.current) return;
+
+    let subscription: any;
+
+    // First, get all existing map objects
+    getMapObjects().then((response) => {
+      if (response.data) {
+        const objects: MapObject[] = response.data.map((item: any) => ({
+          id: item.id,
+          type: item.type,
+          position: {
+            x: item.position_x,
+            y: item.position_y,
+            z: item.position_z,
+          },
+          rotation: {
+            x: item.rotation_x,
+            y: item.rotation_y,
+            z: item.rotation_z,
+          },
+          scaling: {
+            x: item.scaling_x,
+            y: item.scaling_y,
+            z: item.scaling_z,
+          },
+          color: item.color,
+          lastUpdated: new Date(item.last_updated).getTime(),
+        }));
+        setMapObjects(objects);
+      }
+    });
+
+    // Listen for updates
+    listenForMapObjectUpdates((payload) => {
+      if (payload.new) {
+        const mapObject: MapObject = {
+          id: payload.new.id,
+          type: payload.new.type,
+          position: {
+            x: payload.new.position_x,
+            y: payload.new.position_y,
+            z: payload.new.position_z,
+          },
+          rotation: {
+            x: payload.new.rotation_x,
+            y: payload.new.rotation_y,
+            z: payload.new.rotation_z,
+          },
+          scaling: {
+            x: payload.new.scaling_x,
+            y: payload.new.scaling_y,
+            z: payload.new.scaling_z,
+          },
+          color: payload.new.color,
+          lastUpdated: new Date(payload.new.last_updated).getTime(),
+        };
+
+        setMapObjects((prev) => {
+          const filtered = prev.filter((o) => o.id !== mapObject.id);
+          return [...filtered, mapObject];
+        });
+      }
+    }).then((sub) => {
+      subscription = sub;
+    });
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, []);
+
   // Update player position periodically
   useEffect(() => {
     if (!isPlaying || !localPlayer || !engineRef.current) return;
@@ -166,6 +243,15 @@ export function GameContainer() {
       engineRef.current?.updatePlayer(player);
     });
   }, [otherPlayers]);
+
+  // Update map objects in the game engine
+  useEffect(() => {
+    if (!engineRef.current) return;
+
+    mapObjects.forEach((object) => {
+      engineRef.current?.updateMapObject(object);
+    });
+  }, [mapObjects]);
 
   const startGame = async () => {
     if (!canvasRef.current) {

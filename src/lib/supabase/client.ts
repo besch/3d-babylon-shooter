@@ -121,3 +121,47 @@ export async function listenForProjectiles(callback: (payload: any) => void) {
     )
     .subscribe();
 }
+
+export async function sendMapObject(mapObject: any) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return;
+
+  return supabase.from("map_objects").upsert({
+    id: mapObject.id,
+    type: mapObject.type,
+    position_x: mapObject.position.x,
+    position_y: mapObject.position.y,
+    position_z: mapObject.position.z,
+    rotation_x: mapObject.rotation.x,
+    rotation_y: mapObject.rotation.y,
+    rotation_z: mapObject.rotation.z,
+    scaling_x: mapObject.scaling.x,
+    scaling_y: mapObject.scaling.y,
+    scaling_z: mapObject.scaling.z,
+    color: mapObject.color,
+    last_updated: new Date().toISOString(),
+  });
+}
+
+export async function getMapObjects() {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { data: [] };
+
+  return supabase.from("map_objects").select("*");
+}
+
+export async function listenForMapObjectUpdates(
+  callback: (payload: any) => void
+) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  return supabase
+    .channel("map-objects-changes")
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "map_objects" },
+      callback
+    )
+    .subscribe();
+}

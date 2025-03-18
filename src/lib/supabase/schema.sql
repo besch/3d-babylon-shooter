@@ -47,3 +47,28 @@ create policy "Allow all operations on projectiles" on projectiles
 -- Enable realtime for both tables
 alter publication supabase_realtime add table players;
 alter publication supabase_realtime add table projectiles;
+
+
+-- Map objects table
+create table map_objects (
+  id uuid primary key,
+  type text not null,
+  position_x float not null,
+  position_y float not null,
+  position_z float not null,
+  rotation_x float not null,
+  rotation_y float not null,
+  rotation_z float not null,
+  scaling_x float not null,
+  scaling_y float not null,
+  scaling_z float not null,
+  color text not null,
+  last_updated timestamp with time zone not null default now()
+);
+
+-- Enable Row Level Security but allow all operations for now
+alter table map_objects enable row level security;
+create policy "Allow all operations on map_objects" on map_objects for all using (true);
+
+-- Enable realtime for the map_objects table
+alter publication supabase_realtime add table map_objects;

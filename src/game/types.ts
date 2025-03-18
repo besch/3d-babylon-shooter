@@ -70,3 +70,13 @@ export interface SupabaseConfig {
   anonKey: string;
   realtimeChannel: string;
 }
+
+export interface MapObject {
+  id: string;
+  type: "platform" | "building" | "light";
+  position: Vector3;
+  rotation: Vector3;
+  scaling: Vector3;
+  color: string;
+  lastUpdated: number;
+}

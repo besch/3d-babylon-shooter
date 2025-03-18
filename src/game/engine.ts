@@ -1,5 +1,5 @@
 // Use conditional imports to avoid document issues during SSR
-import { Player, GameSettings } from "./types";
+import { Player, GameSettings, MapObject } from "./types";
 
 // Define types to avoid missing BABYLON reference
 let BABYLON: any = null;
@@ -37,7 +37,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   shootsToKill: 3,
   respawnTime: 3000, // 3 seconds
   recoilForce: 0.5,
-  projectileSpeed: 50,
+  projectileSpeed: 100,
   jumpForce: 5,
   gravity: 9.81,
 };
@@ -58,6 +58,7 @@ export class GameEngine {
   private initialized: boolean = false;
   private walls: any[] = [];
   private crosshair: any;
+  private mapObjects: Map<string, any> = new Map();
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -101,12 +102,13 @@ export class GameEngine {
       );
       this.camera.setTarget(new BABYLON.Vector3(0, 1.8, 1));
       this.camera.attachControl(this.canvas, false); // Set false to enable rotation without clicking
-      this.camera.applyGravity = true;
+      this.camera.applyGravity = false; // We'll handle gravity manually to fix jumping issues
       this.camera.checkCollisions = true;
       this.camera.ellipsoid = new BABYLON.Vector3(0.5, 0.9, 0.5);
       this.camera.minZ = 0.1;
-      this.camera.inertia = 0.5; // Lower inertia for smoother movement
+      this.camera.inertia = 0.3; // Lower inertia for smoother movement
       this.camera.angularSensibility = 500; // Adjust sensitivity for camera rotation
+      this.camera.speed = 0.75; // Adjust movement speed
 
       // Controls
       this.camera.keysUp.push(87); // W
@@ -239,16 +241,66 @@ export class GameEngine {
     if (!BABYLON || !this.scene) return;
 
     const wallHeight = 10;
-    const mapSize = 100; // Match the ground size
+    const mapSize = 200; // Match the larger ground size
     const wallThickness = 2;
 
-    // Create materials
+    // Create materials with lighter colors
     const wallMaterial = new BABYLON.StandardMaterial(
       "wallMaterial",
       this.scene
     );
-    wallMaterial.diffuseColor = new BABYLON.Color3(0.1, 0.1, 0.3);
-    wallMaterial.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.1);
+    wallMaterial.diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.8); // Light lavender
+    wallMaterial.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.3); // Subtle glow
+
+    // Create a wall texture programmatically
+    const wallTexture = new BABYLON.DynamicTexture(
+      "wallTexture",
+      { width: 512, height: 512 },
+      this.scene
+    );
+    const ctx = wallTexture.getContext();
+
+    // Fill with a light color
+    ctx.fillStyle = "rgb(180, 180, 220)"; // Light purple background
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Add some pattern to the walls
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgb(140, 140, 200)";
+
+    // Grid pattern
+    const cellSize = 64;
+    for (let x = 0; x <= 512; x += cellSize) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 512);
+      ctx.stroke();
+    }
+
+    for (let y = 0; y <= 512; y += cellSize) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(512, y);
+      ctx.stroke();
+    }
+
+    // Add some random squares for variety
+    ctx.fillStyle = "rgba(160, 160, 230, 0.5)";
+    for (let i = 0; i < 20; i++) {
+      const x = Math.floor(Math.random() * 448);
+      const y = Math.floor(Math.random() * 448);
+      const size = 16 + Math.floor(Math.random() * 48);
+      ctx.fillRect(x, y, size, size);
+    }
+
+    wallTexture.update();
+    wallMaterial.diffuseTexture = wallTexture;
+
+    // Set texture scaling for the walls
+    if (wallMaterial.diffuseTexture) {
+      wallMaterial.diffuseTexture.uScale = 10;
+      wallMaterial.diffuseTexture.vScale = 2;
+    }
 
     // Create four walls
     // North wall
@@ -323,10 +375,39 @@ export class GameEngine {
   private setupInputHandling(): void {
     if (!this.scene) return;
 
-    // Handle shooting
+    // Handle shooting with mouse down, not just clicks
+    let isMouseDown = false;
+    let shootingInterval: any = null;
+
+    // Mouse down event for continuous shooting
     this.scene.onPointerDown = (evt: any) => {
       if (evt.button === 0) {
-        this.shoot();
+        // Left button
+        isMouseDown = true;
+        this.shoot(); // Shoot immediately when pressed
+
+        // Set interval for continuous shooting
+        if (!shootingInterval) {
+          shootingInterval = setInterval(() => {
+            if (isMouseDown) {
+              this.shoot();
+            }
+          }, 200); // Shoot every 200ms
+        }
+      }
+    };
+
+    // Mouse up event to stop shooting
+    this.scene.onPointerUp = (evt: any) => {
+      if (evt.button === 0) {
+        // Left button
+        isMouseDown = false;
+
+        // Clear shooting interval
+        if (shootingInterval) {
+          clearInterval(shootingInterval);
+          shootingInterval = null;
+        }
       }
     };
 
@@ -351,7 +432,7 @@ export class GameEngine {
     });
 
     // Lock the pointer when clicking in the canvas
-    this.scene.onPointerDown = (evt: any) => {
+    this.canvas.addEventListener("click", () => {
       if (!this.scene.isPointerLock) {
         this.canvas.requestPointerLock =
           this.canvas.requestPointerLock ||
@@ -362,11 +443,19 @@ export class GameEngine {
           this.canvas.requestPointerLock();
         }
       }
+    });
 
-      if (evt.button === 0) {
-        this.shoot();
+    // Handle browser exit from the game when pointer lock is lost
+    document.addEventListener("pointerlockchange", () => {
+      if (document.pointerLockElement !== this.canvas) {
+        // Pointer lock was lost, clear shooting interval
+        isMouseDown = false;
+        if (shootingInterval) {
+          clearInterval(shootingInterval);
+          shootingInterval = null;
+        }
       }
-    };
+    });
   }
 
   private shoot(): void {
@@ -616,69 +705,53 @@ export class GameEngine {
     );
     this.ground.checkCollisions = true;
 
+    // Raise the ground slightly to prevent z-fighting
+    this.ground.position.y = 0.01;
+
     const groundMaterial = new BABYLON.StandardMaterial(
       "groundMaterial",
       this.scene
     );
-    groundMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.4, 0.5); // Blueish gray
+    groundMaterial.diffuseColor = new BABYLON.Color3(0.6, 0.8, 0.9); // Much lighter blue
     groundMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.3);
-    groundMaterial.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.1);
+    groundMaterial.emissiveColor = new BABYLON.Color3(0.1, 0.1, 0.2); // Slightly brighter emissive
 
-    // Try to create a grid pattern with a procedural texture
-    try {
-      // Create a grid procedural texture
-      const gridSize = 1.0;
-      const gridTexture = new BABYLON.DynamicTexture(
-        "gridTexture",
-        { width: 512, height: 512 },
-        this.scene
-      );
-      const ctx = gridTexture.getContext();
+    // Create a grid texture programmatically
+    const gridTexture = new BABYLON.DynamicTexture(
+      "gridTexture",
+      { width: 1024, height: 1024 },
+      this.scene
+    );
+    const ctx = gridTexture.getContext();
 
-      // Draw grid lines
-      ctx.fillStyle = "rgb(77, 102, 128)"; // Background color
-      ctx.fillRect(0, 0, 512, 512);
+    // Fill with a light color
+    ctx.fillStyle = "rgb(150, 200, 255)"; // Light blue background
+    ctx.fillRect(0, 0, 1024, 1024);
 
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = "rgb(0, 180, 255)"; // Line color
+    // Draw grid lines less frequently
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgb(100, 150, 255)"; // Darker blue lines
 
-      // Draw major grid lines
-      ctx.beginPath();
-      for (let i = 0; i <= 512; i += 64) {
-        // Vertical lines
-        ctx.moveTo(i, 0);
-        ctx.lineTo(i, 512);
+    // Draw fewer grid lines to reduce blinking
+    ctx.beginPath();
+    for (let i = 0; i <= 1024; i += 128) {
+      // Vertical lines
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, 1024);
 
-        // Horizontal lines
-        ctx.moveTo(0, i);
-        ctx.lineTo(512, i);
-      }
-      ctx.stroke();
+      // Horizontal lines
+      ctx.moveTo(0, i);
+      ctx.lineTo(1024, i);
+    }
+    ctx.stroke();
 
-      // Draw minor grid lines
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      for (let i = 0; i <= 512; i += 32) {
-        if (i % 64 !== 0) {
-          // Skip major gridlines
-          // Vertical lines
-          ctx.moveTo(i, 0);
-          ctx.lineTo(i, 512);
+    gridTexture.update();
+    groundMaterial.diffuseTexture = gridTexture;
 
-          // Horizontal lines
-          ctx.moveTo(0, i);
-          ctx.lineTo(512, i);
-        }
-      }
-      ctx.stroke();
-
-      gridTexture.update();
-
-      // Apply the texture to the ground material
-      groundMaterial.diffuseTexture = gridTexture;
-      groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-    } catch (e) {
-      console.log("Failed to create grid texture, using plain material", e);
+    // Set texture scaling for the ground
+    if (groundMaterial.diffuseTexture) {
+      groundMaterial.diffuseTexture.uScale = 20;
+      groundMaterial.diffuseTexture.vScale = 20;
     }
 
     this.ground.material = groundMaterial;
@@ -890,17 +963,42 @@ export class GameEngine {
       if (!this.localPlayer || !this.camera) return;
 
       // Apply velocity to position
-      this.camera.position.y += this.localPlayer.velocity.y * 0.016; // 60fps
+      const nextPosition =
+        this.camera.position.y + this.localPlayer.velocity.y * 0.016;
 
-      // Apply gravity to velocity
-      this.localPlayer.velocity.y -= this.settings.gravity * 0.016;
+      // Check for collision with platforms and objects
+      const ray = new BABYLON.Ray(
+        new BABYLON.Vector3(
+          this.camera.position.x,
+          nextPosition,
+          this.camera.position.z
+        ),
+        new BABYLON.Vector3(0, -1, 0),
+        1.0
+      );
 
-      // Check if landed
-      if (this.camera.position.y <= 1.8) {
-        this.camera.position.y = 1.8;
+      const hit = this.scene.pickWithRay(ray);
+
+      // If we hit something below us within 1.8 units, land on it
+      if (hit.hit && hit.distance < 1.8) {
+        this.camera.position.y = hit.pickedPoint?.y + 1.8 || 1.8;
         this.localPlayer.isJumping = false;
         this.localPlayer.velocity.y = 0;
         return; // Stop the gravity effect
+      } else {
+        // Otherwise continue falling
+        this.camera.position.y = nextPosition;
+
+        // Apply gravity to velocity
+        this.localPlayer.velocity.y -= this.settings.gravity * 0.016;
+
+        // Check if landed on ground (y=0)
+        if (this.camera.position.y <= 1.8) {
+          this.camera.position.y = 1.8;
+          this.localPlayer.isJumping = false;
+          this.localPlayer.velocity.y = 0;
+          return; // Stop the gravity effect
+        }
       }
 
       // Continue applying gravity
@@ -916,5 +1014,130 @@ export class GameEngine {
 
     this.localPlayer.isCrouching = isCrouching;
     this.camera.position.y = isCrouching ? 0.9 : 1.8;
+  }
+
+  public getMapObjects(): MapObject[] {
+    const objects: MapObject[] = [];
+    this.mapObjects.forEach((mesh, id) => {
+      if (mesh) {
+        objects.push({
+          id,
+          type: mesh.metadata?.type || "platform",
+          position: {
+            x: mesh.position.x,
+            y: mesh.position.y,
+            z: mesh.position.z,
+          },
+          rotation: {
+            x: mesh.rotation.x,
+            y: mesh.rotation.y,
+            z: mesh.rotation.z,
+          },
+          scaling: {
+            x: mesh.scaling.x,
+            y: mesh.scaling.y,
+            z: mesh.scaling.z,
+          },
+          color: mesh.metadata?.color || "#808080",
+          lastUpdated: Date.now(),
+        });
+      }
+    });
+    return objects;
+  }
+
+  public updateMapObject(mapObject: MapObject): void {
+    if (!BABYLON || !this.scene) return;
+
+    let objectMesh = this.mapObjects.get(mapObject.id);
+
+    if (!objectMesh) {
+      // Create the object based on its type
+      switch (mapObject.type) {
+        case "platform":
+          objectMesh = BABYLON.MeshBuilder.CreateBox(
+            `platform-${mapObject.id}`,
+            { width: 5, height: 0.5, depth: 5 },
+            this.scene
+          );
+          break;
+        case "building":
+          objectMesh = BABYLON.MeshBuilder.CreateBox(
+            `building-${mapObject.id}`,
+            { width: 4, height: 10, depth: 4 },
+            this.scene
+          );
+          break;
+        case "light":
+          objectMesh = BABYLON.MeshBuilder.CreateSphere(
+            `light-${mapObject.id}`,
+            { diameter: 0.8 },
+            this.scene
+          );
+
+          // Add a light source
+          const light = new BABYLON.PointLight(
+            `light-source-${mapObject.id}`,
+            new BABYLON.Vector3(0, 0, 0),
+            this.scene
+          );
+          light.parent = objectMesh;
+          light.intensity = 0.7;
+          light.range = 15;
+          break;
+      }
+
+      if (objectMesh) {
+        // Store type in metadata for future reference
+        objectMesh.metadata = {
+          type: mapObject.type,
+          color: mapObject.color,
+        };
+
+        // Set material
+        const material = new BABYLON.StandardMaterial(
+          `material-${mapObject.id}`,
+          this.scene
+        );
+
+        try {
+          // Try to parse the color
+          const hex = mapObject.color.replace("#", "");
+          const r = parseInt(hex.substring(0, 2), 16) / 255;
+          const g = parseInt(hex.substring(2, 4), 16) / 255;
+          const b = parseInt(hex.substring(4, 6), 16) / 255;
+
+          material.diffuseColor = new BABYLON.Color3(r, g, b);
+          material.emissiveColor = new BABYLON.Color3(
+            r * 0.3,
+            g * 0.3,
+            b * 0.3
+          );
+        } catch (e) {
+          // Default color if parsing fails
+          material.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+        }
+
+        objectMesh.material = material;
+        objectMesh.checkCollisions = true;
+
+        this.mapObjects.set(mapObject.id, objectMesh);
+      }
+    }
+
+    // Update position, rotation, and scaling
+    if (objectMesh) {
+      objectMesh.position.x = mapObject.position.x;
+      objectMesh.position.y = mapObject.position.y;
+      objectMesh.position.z = mapObject.position.z;
+
+      objectMesh.rotation.x = mapObject.rotation.x;
+      objectMesh.rotation.y = mapObject.rotation.y;
+      objectMesh.rotation.z = mapObject.rotation.z;
+
+      objectMesh.scaling.x = mapObject.scaling.x;
+      objectMesh.scaling.y = mapObject.scaling.y;
+      objectMesh.scaling.z = mapObject.scaling.z;
+    }
   }
 }
