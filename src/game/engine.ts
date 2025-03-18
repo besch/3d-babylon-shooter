@@ -4,6 +4,7 @@ import { Player, GameSettings, MapObject } from "./types";
 // Define types to avoid missing BABYLON reference
 let BABYLON: any = null;
 let GUI: any = null;
+let cannonModule: any = null;
 
 // Only initialize on client side
 async function loadBabylonModules() {
@@ -21,6 +22,18 @@ async function loadBabylonModules() {
         GUI = gui;
       } catch (guiError) {
         console.error("Failed to load GUI module:", guiError);
+      }
+
+      // Load cannon physics module separately
+      try {
+        const cannon = await import("cannon");
+        console.log("Cannon.js physics loaded successfully");
+        cannonModule = cannon;
+
+        // Make cannon globally available for Babylon's CannonJSPlugin
+        (window as any).CANNON = cannon;
+      } catch (cannonError) {
+        console.error("Failed to load Cannon physics module:", cannonError);
       }
 
       return true;
@@ -109,6 +122,38 @@ export class GameEngine {
       this.camera.inertia = 0.3; // Lower inertia for smoother movement
       this.camera.angularSensibility = 500; // Adjust sensitivity for camera rotation
       this.camera.speed = 0.75; // Adjust movement speed
+
+      // Add a gravity force to keep player on the ground
+      const gravity = new BABYLON.Vector3(0, -this.settings.gravity, 0);
+
+      // Add a custom before render function to apply gravity
+      this.scene.registerBeforeRender(() => {
+        try {
+          if (this.localPlayer && !this.localPlayer.isJumping) {
+            // Cast ray downward to check ground distance
+            const ray = new BABYLON.Ray(
+              this.camera.position,
+              new BABYLON.Vector3(0, -1, 0),
+              1.9 // Check distance to ground
+            );
+
+            const hit = this.scene.pickWithRay(ray);
+
+            // If not on ground, apply gravity
+            if (!hit.hit && this.camera.position.y > 1.8) {
+              this.camera.position.y -= 0.1; // Move toward ground
+              if (this.camera.position.y < 1.8) {
+                this.camera.position.y = 1.8; // Don't go below ground level
+              }
+            } else if (hit.hit && hit.distance < 1.8) {
+              // If too close to ground, push up
+              this.camera.position.y = hit.pickedPoint.y + 1.8;
+            }
+          }
+        } catch (error) {
+          // Silent error handling to prevent crashes
+        }
+      });
 
       // Controls
       this.camera.keysUp.push(87); // W
@@ -381,81 +426,108 @@ export class GameEngine {
 
     // Mouse down event for continuous shooting
     this.scene.onPointerDown = (evt: any) => {
-      if (evt.button === 0) {
-        // Left button
-        isMouseDown = true;
-        this.shoot(); // Shoot immediately when pressed
+      try {
+        if (evt.button === 0) {
+          // Left button
+          isMouseDown = true;
+          this.shoot(); // Shoot immediately when pressed
 
-        // Set interval for continuous shooting
-        if (!shootingInterval) {
-          shootingInterval = setInterval(() => {
-            if (isMouseDown) {
-              this.shoot();
-            }
-          }, 200); // Shoot every 200ms
+          // Set interval for continuous shooting
+          if (!shootingInterval) {
+            shootingInterval = setInterval(() => {
+              if (isMouseDown) {
+                this.shoot();
+              }
+            }, 200); // Shoot every 200ms
+          }
         }
+      } catch (error) {
+        console.error("Error in onPointerDown:", error);
       }
     };
 
     // Mouse up event to stop shooting
     this.scene.onPointerUp = (evt: any) => {
-      if (evt.button === 0) {
-        // Left button
-        isMouseDown = false;
+      try {
+        if (evt.button === 0) {
+          // Left button
+          isMouseDown = false;
 
-        // Clear shooting interval
-        if (shootingInterval) {
-          clearInterval(shootingInterval);
-          shootingInterval = null;
+          // Clear shooting interval
+          if (shootingInterval) {
+            clearInterval(shootingInterval);
+            shootingInterval = null;
+          }
         }
+      } catch (error) {
+        console.error("Error in onPointerUp:", error);
       }
     };
 
     // Handle jumping and crouching
     this.scene.onKeyboardObservable.add((kbInfo: any) => {
-      if (!this.localPlayer) return;
+      try {
+        if (!this.localPlayer) return;
 
-      switch (kbInfo.type) {
-        case BABYLON.KeyboardEventTypes.KEYDOWN:
-          if (kbInfo.event.key === " " && !this.localPlayer.isJumping) {
-            this.jump();
-          } else if (kbInfo.event.key === "Shift") {
-            this.crouch(true);
-          }
-          break;
-        case BABYLON.KeyboardEventTypes.KEYUP:
-          if (kbInfo.event.key === "Shift") {
-            this.crouch(false);
-          }
-          break;
+        switch (kbInfo.type) {
+          case BABYLON.KeyboardEventTypes.KEYDOWN:
+            if (kbInfo.event.key === " " && !this.localPlayer.isJumping) {
+              this.jump();
+            } else if (kbInfo.event.key === "Shift") {
+              this.crouch(true);
+            }
+            break;
+          case BABYLON.KeyboardEventTypes.KEYUP:
+            if (kbInfo.event.key === "Shift") {
+              this.crouch(false);
+            }
+            break;
+        }
+      } catch (error) {
+        console.error("Error in keyboard handling:", error);
       }
     });
 
-    // Lock the pointer when clicking in the canvas
+    // Lock the pointer when clicking in the canvas with better error handling
     this.canvas.addEventListener("click", () => {
-      if (!this.scene.isPointerLock) {
-        this.canvas.requestPointerLock =
-          this.canvas.requestPointerLock ||
-          (this.canvas as any).mozRequestPointerLock ||
-          (this.canvas as any).webkitRequestPointerLock;
+      try {
+        if (!this.scene.isPointerLock) {
+          this.canvas.requestPointerLock =
+            this.canvas.requestPointerLock ||
+            (this.canvas as any).mozRequestPointerLock ||
+            (this.canvas as any).webkitRequestPointerLock;
 
-        if (this.canvas.requestPointerLock) {
-          this.canvas.requestPointerLock();
+          if (this.canvas.requestPointerLock) {
+            this.canvas.requestPointerLock();
+          }
         }
+      } catch (error) {
+        console.error("Error requesting pointer lock:", error);
       }
     });
 
-    // Handle browser exit from the game when pointer lock is lost
-    document.addEventListener("pointerlockchange", () => {
-      if (document.pointerLockElement !== this.canvas) {
-        // Pointer lock was lost, clear shooting interval
-        isMouseDown = false;
-        if (shootingInterval) {
-          clearInterval(shootingInterval);
-          shootingInterval = null;
+    // Safer handling of pointer lock changes
+    const pointerlockChangeHandler = () => {
+      try {
+        if (document.pointerLockElement !== this.canvas) {
+          // Pointer lock was lost, clear shooting interval
+          isMouseDown = false;
+          if (shootingInterval) {
+            clearInterval(shootingInterval);
+            shootingInterval = null;
+          }
         }
+      } catch (error) {
+        console.error("Error handling pointerlockchange:", error);
       }
-    });
+    };
+
+    document.addEventListener("pointerlockchange", pointerlockChangeHandler);
+    document.addEventListener("mozpointerlockchange", pointerlockChangeHandler);
+    document.addEventListener(
+      "webkitpointerlockchange",
+      pointerlockChangeHandler
+    );
   }
 
   private shoot(): void {
@@ -502,141 +574,178 @@ export class GameEngine {
   private createProjectile(): void {
     if (!this.localPlayer || !BABYLON || !this.scene || !this.camera) return;
 
-    // Generate a unique ID for the projectile
-    const projectileId = `proj-${Date.now()}-${Math.floor(
-      Math.random() * 1000
-    )}`;
+    try {
+      // Generate a proper UUID for the projectile
+      const { v4: uuidv4 } = require("uuid");
+      const projectileId = uuidv4();
 
-    // Create a larger and brighter projectile
-    const projectile = BABYLON.MeshBuilder.CreateSphere(
-      projectileId,
-      { diameter: 0.25 }, // Larger diameter for better visibility
-      this.scene
-    );
+      // Create a smaller projectile
+      const projectile = BABYLON.MeshBuilder.CreateSphere(
+        projectileId,
+        { diameter: 0.15 }, // Smaller diameter for better visibility
+        this.scene
+      );
 
-    // Create a glow layer for projectiles if it doesn't exist yet
-    let glowLayer = this.scene.getGlowLayerByName("projectileGlow");
-    if (!glowLayer) {
-      glowLayer = new BABYLON.GlowLayer("projectileGlow", this.scene);
-      glowLayer.intensity = 1.0;
-    }
+      // Create a glow layer for projectiles if it doesn't exist yet
+      let glowLayer = this.scene.getGlowLayerByName("projectileGlow");
+      if (!glowLayer) {
+        glowLayer = new BABYLON.GlowLayer("projectileGlow", this.scene);
+        glowLayer.intensity = 0.8;
+      }
 
-    const projectileMaterial = new BABYLON.StandardMaterial(
-      `projectileMaterial-${projectileId}`,
-      this.scene
-    );
-    projectileMaterial.diffuseColor = new BABYLON.Color3(1, 0.3, 0.3);
-    projectileMaterial.emissiveColor = new BABYLON.Color3(1, 0.3, 0.3); // Bright red glow
-    projectileMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
-    projectile.material = projectileMaterial;
+      const projectileMaterial = new BABYLON.StandardMaterial(
+        `projectileMaterial-${projectileId}`,
+        this.scene
+      );
+      projectileMaterial.diffuseColor = new BABYLON.Color3(1, 0.3, 0.3);
+      projectileMaterial.emissiveColor = new BABYLON.Color3(1, 0.3, 0.3); // Bright red glow
+      projectileMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
+      projectile.material = projectileMaterial;
 
-    // Add the projectile to the glow layer
-    glowLayer.addIncludedOnlyMesh(projectile);
+      // Add the projectile to the glow layer
+      glowLayer.addIncludedOnlyMesh(projectile);
 
-    // Get the exact direction where the camera is looking
-    const direction = this.getForwardDirection();
+      // Get the exact direction where the camera is looking
+      const direction = this.getForwardDirection();
 
-    // Position the projectile directly in front of the camera (centered with the crosshair)
-    projectile.position = new BABYLON.Vector3(
-      this.camera.position.x,
-      this.camera.position.y,
-      this.camera.position.z
-    ).add(direction.scale(1)); // Start 1 unit in front of camera
+      // Position the projectile directly in front of the camera (centered with the crosshair)
+      projectile.position = new BABYLON.Vector3(
+        this.camera.position.x,
+        this.camera.position.y,
+        this.camera.position.z
+      ).add(direction.scale(1)); // Start 1 unit in front of camera
 
-    // Add a trail effect to make projectile more visible
-    const trail = new BABYLON.TrailMesh(
-      "trail",
-      projectile,
-      this.scene,
-      0.1,
-      30,
-      true
-    );
-    const trailMaterial = new BABYLON.StandardMaterial(
-      "trailMaterial",
-      this.scene
-    );
-    trailMaterial.emissiveColor = new BABYLON.Color3(1, 0.3, 0.3);
-    trailMaterial.diffuseColor = new BABYLON.Color3(1, 0.05, 0.05);
-    trailMaterial.alpha = 0.7;
-    trail.material = trailMaterial;
+      // Add a trail effect to make projectile more visible
+      const trail = new BABYLON.TrailMesh(
+        "trail" + projectileId,
+        projectile,
+        this.scene,
+        0.05, // Smaller trail width
+        15, // Shorter trail
+        true
+      );
+      const trailMaterial = new BABYLON.StandardMaterial(
+        "trailMaterial" + projectileId,
+        this.scene
+      );
+      trailMaterial.emissiveColor = new BABYLON.Color3(1, 0.3, 0.3);
+      trailMaterial.diffuseColor = new BABYLON.Color3(1, 0.05, 0.05);
+      trailMaterial.alpha = 0.7;
+      trail.material = trailMaterial;
 
-    // Simple projectile motion
-    const speed = this.settings.projectileSpeed;
-    const velocity = direction.scale(speed);
+      // Simple projectile motion
+      const speed = this.settings.projectileSpeed;
+      const velocity = direction.scale(speed);
 
-    // Create a physics impostor for collision detection
-    projectile.physicsImpostor = new BABYLON.PhysicsImpostor(
-      projectile,
-      BABYLON.PhysicsImpostor.SphereImpostor,
-      { mass: 0.1, friction: 0.5, restitution: 0.3 },
-      this.scene
-    );
+      // Store the shooter ID for hit detection
+      projectile.metadata = {
+        shooterId: this.localPlayer.id,
+        damage: this.settings.maxHealth / this.settings.shootsToKill,
+        velocity: velocity,
+      };
 
-    // Store the shooter ID for hit detection
-    projectile.metadata = {
-      shooterId: this.localPlayer.id,
-      damage: this.settings.maxHealth / this.settings.shootsToKill,
-    };
+      // Always use simple motion as the more reliable approach
+      const useSimpleMotion = true;
 
-    // Set the velocity directly
-    projectile.physicsImpostor.setLinearVelocity(velocity);
+      // Update function for projectile movement and tracking
+      const updateFunction = () => {
+        try {
+          if (useSimpleMotion && !projectile.isDisposed()) {
+            // Simple manual motion
+            if (projectile.metadata?.velocity) {
+              projectile.position.addInPlace(
+                projectile.metadata.velocity.scale(0.016) // Scale by time delta
+              );
+            }
 
-    // Register collision event
-    projectile.physicsImpostor.registerOnPhysicsCollide(
-      this.scene.getPhysicsImpostors(),
-      (collider: any) => {
-        const collidedMesh = collider.object;
+            // Simple collision detection with other players
+            this.players.forEach((playerMesh, id) => {
+              if (id !== this.localPlayer?.id && !projectile.isDisposed()) {
+                const distance = BABYLON.Vector3.Distance(
+                  projectile.position,
+                  playerMesh.position.add(new BABYLON.Vector3(0, 1, 0))
+                );
 
-        // Check if we hit a player
-        if (
-          collidedMesh.name.startsWith("player-") &&
-          collidedMesh.metadata?.playerId
-        ) {
-          const hitPlayerId = collidedMesh.metadata.playerId;
+                if (distance < 1.0) {
+                  // Hit detected
+                  this.damagePlayer(id, projectile.metadata.damage);
 
-          // Don't damage yourself
-          if (hitPlayerId !== this.localPlayer?.id) {
-            this.damagePlayer(hitPlayerId, projectile.metadata.damage);
+                  // Dispose of the projectile
+                  this.scene.unregisterBeforeRender(updateFunction);
+                  if (!projectile.isDisposed()) projectile.dispose();
+                  if (trail && !trail.isDisposed()) trail.dispose();
+                }
+              }
+            });
           }
-        }
 
-        // Dispose of the projectile after a hit
-        this.scene.unregisterBeforeRender(updateFunction);
-        projectile.dispose();
-        if (trail && !trail.isDisposed()) {
-          trail.dispose();
+          // Check if projectile is too far away and dispose if needed
+          if (
+            !projectile.isDisposed() &&
+            projectile.position.subtract(this.camera.position).length() > 100
+          ) {
+            this.scene.unregisterBeforeRender(updateFunction);
+            if (trail && !trail.isDisposed()) trail.dispose();
+            if (!projectile.isDisposed()) projectile.dispose();
+          }
+        } catch (error) {
+          console.error("Error in projectile update:", error);
+          // Clean up on error
+          this.scene.unregisterBeforeRender(updateFunction);
+          if (!projectile.isDisposed()) projectile.dispose();
+          if (trail && !trail.isDisposed()) trail.dispose();
         }
-      }
-    );
+      };
 
-    // Update function for projectile movement and tracking
-    const updateFunction = () => {
-      // Check if projectile is too far away and dispose if needed
-      if (projectile.position.subtract(this.camera.position).length() > 100) {
-        this.scene.unregisterBeforeRender(updateFunction);
-        if (trail && !trail.isDisposed()) {
-          trail.dispose();
+      // Register the update function
+      this.scene.registerBeforeRender(updateFunction);
+
+      // Destroy projectile after 3 seconds as a backup
+      setTimeout(() => {
+        try {
+          this.scene.unregisterBeforeRender(updateFunction);
+          if (trail && !trail.isDisposed()) trail.dispose();
+          if (projectile && !projectile.isDisposed()) projectile.dispose();
+        } catch (error) {
+          console.error("Error disposing projectile:", error);
         }
-        if (projectile && !projectile.isDisposed()) {
-          projectile.dispose();
-        }
-      }
-    };
+      }, 3000);
 
-    // Register the update function
-    this.scene.registerBeforeRender(updateFunction);
+      // Send projectile to other players via network
+      this.sendProjectileUpdate(projectileId, direction);
+    } catch (error) {
+      console.error("Critical error creating projectile:", error);
+    }
+  }
 
-    // Destroy projectile after 3 seconds as a backup
-    setTimeout(() => {
-      this.scene.unregisterBeforeRender(updateFunction);
-      if (trail && !trail.isDisposed()) {
-        trail.dispose();
-      }
-      if (projectile && !projectile.isDisposed()) {
-        projectile.dispose();
-      }
-    }, 3000);
+  private async sendProjectileUpdate(
+    projectileId: string,
+    direction: any
+  ): Promise<void> {
+    if (!this.localPlayer || !this.camera) return;
+
+    try {
+      // Dynamically import to avoid circular dependencies
+      const { sendProjectile } = await import("@/lib/supabase/client");
+
+      // Format the data according to the expected schema
+      const projectileData = {
+        id: projectileId,
+        player_id: this.localPlayer.id,
+        position_x: this.camera.position.x,
+        position_y: this.camera.position.y,
+        position_z: this.camera.position.z,
+        direction_x: direction.x,
+        direction_y: direction.y,
+        direction_z: direction.z,
+        created_at: new Date().toISOString(),
+      };
+
+      // Send projectile data to other players
+      await sendProjectile(projectileData);
+    } catch (err) {
+      console.error("Failed to send projectile data:", err);
+    }
   }
 
   /**
@@ -1007,10 +1116,57 @@ export class GameEngine {
   }
 
   public enablePhysics(): void {
-    // Simplified version that doesn't rely on the physics plugin
-    console.log(
-      "Physics disabled - using simplified projectile motion instead"
-    );
+    if (!BABYLON || !this.scene) return;
+
+    try {
+      // First check if we have access to the necessary physics plugin
+      if (BABYLON.CannonJSPlugin) {
+        // Create a simple gravity-based physics engine
+        this.scene.enablePhysics(
+          new BABYLON.Vector3(0, -this.settings.gravity, 0),
+          new BABYLON.CannonJSPlugin()
+        );
+        console.log("Physics enabled with CannonJSPlugin successfully");
+      } else {
+        throw new Error("CannonJSPlugin not available");
+      }
+    } catch (error) {
+      // Fallback to a custom physics implementation if the plugin fails
+      console.warn("Failed to enable physics plugin:", error);
+      console.log("Using simplified physics instead");
+
+      // Set a flag to use simplified physics
+      (this.scene as any).isPhysicsEnabled = true;
+
+      // Create a more complete mock physics engine to avoid method missing errors
+      if (!(this.scene as any)._physicsEngine) {
+        const dummyImpostors: any[] = [];
+
+        (this.scene as any)._physicsEngine = {
+          getImpostors: () => dummyImpostors,
+          getPhysicsPlugin: () => ({
+            world: {},
+            executeStep: () => {},
+          }),
+          dispose: () => {},
+          getSubTimeStep: () => 0.01,
+          setSubTimeStep: () => {},
+          setTimeStep: () => {},
+          setGravity: (gravity: any) => {},
+          _physicsPlugin: {
+            world: {},
+            executeStep: () => {},
+            setGravity: () => {},
+          },
+          _impostors: dummyImpostors,
+        };
+
+        // Add the missing getPhysicsImpostors method directly to the scene
+        (this.scene as any).getPhysicsImpostors = function () {
+          return dummyImpostors;
+        };
+      }
+    }
   }
 
   public createCyberpunkMap(): void {
@@ -1673,5 +1829,221 @@ export class GameEngine {
     // Get forward direction directly from the camera
     const forward = this.camera.getDirection(new BABYLON.Vector3(0, 0, 1));
     return forward.normalize();
+  }
+
+  /**
+   * Create a projectile from another player (received via network)
+   */
+  public createRemoteProjectile(projectileData: any): void {
+    if (!BABYLON || !this.scene) return;
+
+    // Generate a unique ID for the projectile
+    const projectileId = projectileData.id;
+
+    console.log(
+      "Creating remote projectile:",
+      projectileId,
+      "from player:",
+      projectileData.playerId
+    );
+
+    // Create a projectile sphere
+    const projectile = BABYLON.MeshBuilder.CreateSphere(
+      projectileId,
+      { diameter: 0.3 }, // Slightly larger for better visibility
+      this.scene
+    );
+
+    // Create a material for the projectile
+    const projectileMaterial = new BABYLON.StandardMaterial(
+      `projectileMaterial-${projectileId}`,
+      this.scene
+    );
+    projectileMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.6, 1); // Blue for remote projectiles
+    projectileMaterial.emissiveColor = new BABYLON.Color3(0.3, 0.6, 1);
+    projectileMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
+    projectile.material = projectileMaterial;
+
+    // Add glow effect
+    let glowLayer = this.scene.getGlowLayerByName("projectileGlow");
+    if (!glowLayer) {
+      glowLayer = new BABYLON.GlowLayer("projectileGlow", this.scene);
+      glowLayer.intensity = 0.8;
+    }
+    glowLayer.addIncludedOnlyMesh(projectile);
+
+    // Position the projectile
+    projectile.position = new BABYLON.Vector3(
+      projectileData.position.x,
+      projectileData.position.y,
+      projectileData.position.z
+    );
+
+    // Create direction vector
+    const direction = new BABYLON.Vector3(
+      projectileData.direction.x,
+      projectileData.direction.y,
+      projectileData.direction.z
+    );
+
+    // Add a trail effect
+    const trail = new BABYLON.TrailMesh(
+      "trail" + projectileId,
+      projectile,
+      this.scene,
+      0.1, // Wider trail for better visibility
+      20,
+      true
+    );
+    const trailMaterial = new BABYLON.StandardMaterial(
+      "trailMaterial" + projectileId,
+      this.scene
+    );
+    trailMaterial.emissiveColor = new BABYLON.Color3(0.3, 0.6, 1); // Blue trail
+    trailMaterial.diffuseColor = new BABYLON.Color3(0.3, 0.6, 1);
+    trailMaterial.alpha = 0.7;
+    trail.material = trailMaterial;
+
+    // Calculate velocity
+    const speed = this.settings.projectileSpeed;
+    const velocity = direction.normalize().scale(speed);
+
+    // Store metadata
+    projectile.metadata = {
+      shooterId: projectileData.playerId,
+      damage: this.settings.maxHealth / this.settings.shootsToKill,
+      velocity: velocity,
+    };
+
+    // Update function for projectile movement and tracking
+    const updateFunction = () => {
+      try {
+        // Simple manual motion
+        if (projectile.metadata?.velocity && !projectile.isDisposed()) {
+          projectile.position.addInPlace(
+            projectile.metadata.velocity.scale(0.016) // Scale by time delta
+          );
+        }
+
+        // Simple collision detection with the local player
+        if (this.localPlayer && this.camera && !projectile.isDisposed()) {
+          const distance = BABYLON.Vector3.Distance(
+            projectile.position,
+            this.camera.position
+          );
+
+          if (distance < 1.0) {
+            // Local player hit by remote projectile
+            console.log(
+              "Local player hit by remote projectile from:",
+              projectile.metadata.shooterId
+            );
+
+            // Reduce local player health
+            if (this.localPlayer) {
+              this.localPlayer.health = Math.max(
+                0,
+                this.localPlayer.health - projectile.metadata.damage
+              );
+
+              // If player died, increment the shooter's kill count
+              if (this.localPlayer.health <= 0) {
+                // Reset health and teleport
+                this.localPlayer.health = this.settings.maxHealth;
+                this.respawnLocalPlayer();
+
+                // Increment deaths count
+                this.localPlayer.deaths += 1;
+
+                // Update server with new health and deaths count
+                this.updateLocalPlayerStats();
+              }
+            }
+
+            // Dispose of the projectile
+            this.scene.unregisterBeforeRender(updateFunction);
+            projectile.dispose();
+            if (trail && !trail.isDisposed()) {
+              trail.dispose();
+            }
+          }
+        }
+
+        // Check if projectile is too far away
+        if (
+          !projectile.isDisposed() &&
+          BABYLON.Vector3.Distance(
+            projectile.position,
+            projectileData.position // Use original position for distance check
+          ) > 100
+        ) {
+          this.scene.unregisterBeforeRender(updateFunction);
+          if (trail && !trail.isDisposed()) {
+            trail.dispose();
+          }
+          if (projectile && !projectile.isDisposed()) {
+            projectile.dispose();
+          }
+        }
+      } catch (error) {
+        console.error("Error in remote projectile update:", error);
+        // Clean up on error
+        this.scene.unregisterBeforeRender(updateFunction);
+        if (!projectile.isDisposed()) projectile.dispose();
+        if (trail && !trail.isDisposed()) trail.dispose();
+      }
+    };
+
+    // Register the update function
+    this.scene.registerBeforeRender(updateFunction);
+
+    // Destroy projectile after 3 seconds as a backup
+    setTimeout(() => {
+      try {
+        this.scene.unregisterBeforeRender(updateFunction);
+        if (trail && !trail.isDisposed()) {
+          trail.dispose();
+        }
+        if (projectile && !projectile.isDisposed()) {
+          projectile.dispose();
+        }
+      } catch (error) {
+        console.error("Error disposing remote projectile:", error);
+      }
+    }, 3000);
+  }
+
+  // Respawn local player at a random position
+  private respawnLocalPlayer(): void {
+    if (!this.localPlayer || !this.camera) return;
+
+    // Get a random spawn position
+    const spawnPos = this.getRandomSpawnPosition();
+
+    // Move the camera to spawn position
+    this.camera.position = new BABYLON.Vector3(
+      spawnPos.x,
+      1.8, // Fixed height off the ground
+      spawnPos.z
+    );
+
+    // Reset jumping and velocity
+    this.localPlayer.isJumping = false;
+    this.localPlayer.velocity = { x: 0, y: 0, z: 0 };
+  }
+
+  // Update local player stats to server after being hit
+  private async updateLocalPlayerStats(): Promise<void> {
+    try {
+      if (!this.localPlayer) return;
+
+      // Import the update function dynamically
+      const { sendPlayerUpdate } = await import("@/lib/supabase/client");
+
+      // Send the updated local player to the server
+      await sendPlayerUpdate(this.localPlayer);
+    } catch (err) {
+      console.error("Failed to update local player stats:", err);
+    }
   }
 }

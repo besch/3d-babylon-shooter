@@ -72,17 +72,36 @@ export async function sendProjectile(projectile: any) {
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
-  return supabase.from("projectiles").insert({
-    id: projectile.id,
-    player_id: projectile.playerId,
-    position_x: projectile.position.x,
-    position_y: projectile.position.y,
-    position_z: projectile.position.z,
-    direction_x: projectile.direction.x,
-    direction_y: projectile.direction.y,
-    direction_z: projectile.direction.z,
-    created_at: new Date().toISOString(),
-  });
+  try {
+    // Make sure we're sending the data in the format expected by the database
+    const projectileData = {
+      id: projectile.id,
+      player_id: projectile.player_id,
+      position_x: projectile.position_x,
+      position_y: projectile.position_y,
+      position_z: projectile.position_z,
+      direction_x: projectile.direction_x,
+      direction_y: projectile.direction_y,
+      direction_z: projectile.direction_z,
+      created_at: projectile.created_at || new Date().toISOString(),
+    };
+
+    console.log("Sending projectile to Supabase:", projectileData);
+
+    // Insert the projectile data
+    const { data, error } = await supabase
+      .from("projectiles")
+      .insert(projectileData);
+
+    if (error) {
+      console.error("Error saving projectile:", error);
+    }
+
+    return { data, error };
+  } catch (err) {
+    console.error("Exception saving projectile:", err);
+    return { data: null, error: err };
+  }
 }
 
 export async function getActivePlayers() {

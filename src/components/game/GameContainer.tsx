@@ -13,6 +13,7 @@ import {
   getMapObjects,
   listenForMapObjectUpdates,
   sendMapObject,
+  listenForProjectiles,
 } from "@/lib/supabase/client";
 
 const TECH_COMPANIES: TechCompany[] = [
@@ -94,7 +95,18 @@ export function GameContainer() {
 
     let subscription: any;
     listenForPlayerUpdates((payload) => {
-      if (payload.new && payload.new.id !== localPlayer?.id) {
+      if (payload.eventType === "DELETE") {
+        // Player was deleted/disconnected
+        if (payload.old && payload.old.id) {
+          setOtherPlayers((prev) =>
+            prev.filter((p) => p.id !== payload.old.id)
+          );
+          // Remove player from the game engine if it's initialized
+          if (engineRef.current) {
+            engineRef.current.removePlayer(payload.old.id);
+          }
+        }
+      } else if (payload.new && payload.new.id !== localPlayer?.id) {
         const player: Player = {
           id: payload.new.id,
           name: payload.new.name,
@@ -134,6 +146,39 @@ export function GameContainer() {
       subscription?.unsubscribe();
     };
   }, [localPlayer?.id]);
+
+  // Setup subscription for projectiles from other players
+  useEffect(() => {
+    if (!supabaseRef.current || !engineRef.current || !isPlaying) return;
+
+    let subscription: any;
+    listenForProjectiles((payload) => {
+      if (payload.new && payload.new.player_id !== localPlayer?.id) {
+        // Create projectile from another player
+        console.log("Received projectile from server:", payload.new.id);
+        engineRef.current?.createRemoteProjectile({
+          id: payload.new.id,
+          playerId: payload.new.player_id,
+          position: {
+            x: payload.new.position_x,
+            y: payload.new.position_y,
+            z: payload.new.position_z,
+          },
+          direction: {
+            x: payload.new.direction_x,
+            y: payload.new.direction_y,
+            z: payload.new.direction_z,
+          },
+        });
+      }
+    }).then((sub) => {
+      subscription = sub;
+    });
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, [localPlayer?.id, engineRef.current, isPlaying]);
 
   // Set up realtime subscription for map objects
   useEffect(() => {
@@ -253,6 +298,51 @@ export function GameContainer() {
     });
   }, [mapObjects]);
 
+  // Delete player from the database when the game is stopped
+  useEffect(() => {
+    // When the game stops, clean up player data
+    return () => {
+      if (localPlayer) {
+        deletePlayerOnExit(localPlayer.id).catch(console.error);
+      }
+    };
+  }, [localPlayer?.id]);
+
+  // Clean up player when they close the window/tab
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (localPlayer) {
+        // Using navigator.sendBeacon for more reliable cleanup on page close
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+        const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+        if (supabaseUrl && supabaseKey) {
+          const url = `${supabaseUrl}/rest/v1/players?id=eq.${localPlayer.id}`;
+          const headers = {
+            "Content-Type": "application/json",
+            apikey: supabaseKey,
+            Authorization: `Bearer ${supabaseKey}`,
+            Prefer: "return=minimal",
+          };
+
+          navigator.sendBeacon(
+            url,
+            JSON.stringify({
+              headers,
+              method: "DELETE",
+            })
+          );
+        }
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [localPlayer]);
+
   const startGame = async () => {
     if (!canvasRef.current) {
       setError("Canvas not available");
@@ -361,13 +451,20 @@ export function GameContainer() {
   };
 
   const stopGame = () => {
+    if (localPlayer) {
+      // Delete the player from the database when stopping the game
+      deletePlayerOnExit(localPlayer.id).catch(console.error);
+    }
+
     if (engineRef.current) {
       engineRef.current.dispose();
       engineRef.current = null;
     }
+
     setIsPlaying(false);
     setDebug([]);
     setLocalPlayer(null); // Clear the local player when stopping the game
+    setOtherPlayers([]); // Clear other players
   };
 
   const generateDummyPlayers = (
@@ -415,6 +512,17 @@ export function GameContainer() {
     const availableNames = TECH_COMPANIES.filter((name) => name !== playerName);
     const randomIndex = Math.floor(Math.random() * availableNames.length);
     setPlayerName(availableNames[randomIndex]);
+  };
+
+  // Clean up function to delete the player when leaving the game
+  const deletePlayerOnExit = async (playerId: string) => {
+    if (!supabaseRef.current) return;
+    try {
+      console.log("Deleting player on exit:", playerId);
+      await supabaseRef.current.from("players").delete().eq("id", playerId);
+    } catch (error) {
+      console.error("Error deleting player on exit:", error);
+    }
   };
 
   return (
