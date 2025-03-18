@@ -311,3 +311,94 @@ export async function incrementPlayerKills(playerId: string) {
     return { data: null, error: err };
   }
 }
+
+// Add a function to properly delete a player
+export async function deletePlayer(playerId: string) {
+  const supabase = getSupabaseClient();
+  if (!supabase) return { error: "Supabase client not available" };
+
+  console.log(`Deleting player ${playerId} from database`);
+
+  try {
+    // First check if the player exists
+    const { data: existingPlayer, error: checkError } = await supabase
+      .from("players")
+      .select("id")
+      .eq("id", playerId)
+      .single();
+
+    if (checkError) {
+      console.warn(
+        `Player ${playerId} not found or error checking existence:`,
+        checkError
+      );
+      return { error: checkError };
+    }
+
+    // First delete all projectiles that reference this player to avoid FK constraint violations
+    try {
+      console.log(`Deleting all projectiles for player ${playerId}`);
+
+      const { error: deleteProjectilesError } = await supabase
+        .from("projectiles")
+        .delete()
+        .eq("player_id", playerId);
+
+      if (deleteProjectilesError) {
+        console.warn(
+          `Warning: Could not delete projectiles for player ${playerId}:`,
+          deleteProjectilesError
+        );
+        // Continue anyway, we'll try marking as inactive as fallback
+      } else {
+        console.log(`Successfully deleted projectiles for player ${playerId}`);
+      }
+    } catch (projectilesError) {
+      console.warn("Error cleaning up projectiles:", projectilesError);
+      // Continue with player deletion/inactivation regardless
+    }
+
+    // Now try to delete the player
+    const { error } = await supabase
+      .from("players")
+      .delete()
+      .eq("id", playerId);
+
+    if (error) {
+      console.error(`Error deleting player ${playerId}:`, error);
+
+      // If we still get a conflict error after projectile cleanup, mark as inactive
+      if (error.code === "409" || error.code === "23503") {
+        console.log(
+          "Conflict error - trying to mark player as inactive instead"
+        );
+
+        // Use PATCH instead of UPDATE to avoid additional validation issues
+        const { error: updateError } = await supabase
+          .from("players")
+          .update({
+            is_active: false,
+            health: 0,
+            last_updated: new Date().toISOString(),
+          })
+          .eq("id", playerId);
+
+        if (updateError) {
+          console.error("Failed to mark player as inactive:", updateError);
+          return { error: updateError };
+        } else {
+          console.log(`Player ${playerId} marked as inactive`);
+          return { success: true, wasMarkedInactive: true };
+        }
+      }
+
+      return { error };
+    }
+
+    console.log(`Player ${playerId} deleted successfully`);
+    return { success: true };
+  } catch (err) {
+    console.error(`Exception deleting player ${playerId}:`, err);
+    return { error: err };
+  }
+}

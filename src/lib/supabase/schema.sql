@@ -17,13 +17,14 @@ create table players (
   health integer not null default 100,
   kills integer not null default 0,
   deaths integer not null default 0,
-  last_updated timestamp with time zone not null default now()
+  last_updated timestamp with time zone not null default now(),
+  is_active boolean not null default true
 );
 
 -- Projectiles table
 create table projectiles (
   id uuid primary key,
-  player_id uuid references players(id),
+  player_id uuid references players(id) ON DELETE CASCADE,
   position_x float not null,
   position_y float not null,
   position_z float not null,

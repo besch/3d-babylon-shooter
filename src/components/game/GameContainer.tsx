@@ -93,20 +93,96 @@ export function GameContainer() {
   useEffect(() => {
     if (!supabaseRef.current) return;
 
+    // Track the last state for each player to prevent duplicate updates
+    const playerLastStates = new Map<
+      string,
+      {
+        isJumping: boolean;
+        isCrouching: boolean;
+        x: number;
+        y: number;
+        z: number;
+        health: number;
+        lastUpdateTime: number;
+      }
+    >();
+
     let subscription: any;
     listenForPlayerUpdates((payload) => {
+      // Handle DELETE events
       if (payload.eventType === "DELETE") {
-        // Player was deleted/disconnected
         if (payload.old && payload.old.id) {
           setOtherPlayers((prev) =>
             prev.filter((p) => p.id !== payload.old.id)
           );
+          playerLastStates.delete(payload.old.id);
           // Remove player from the game engine if it's initialized
           if (engineRef.current) {
             engineRef.current.removePlayer(payload.old.id);
           }
         }
-      } else if (payload.new && payload.new.id !== localPlayer?.id) {
+        return;
+      }
+
+      // Handle player updates
+      if (payload.new && payload.new.id !== localPlayer?.id) {
+        // Skip inactive players
+        if (payload.new.is_active === false) {
+          // If player became inactive, remove them
+          if (payload.old?.is_active === true) {
+            console.log(
+              `Player ${payload.new.id} became inactive, removing from view`
+            );
+            setOtherPlayers((prev) =>
+              prev.filter((p) => p.id !== payload.new.id)
+            );
+            playerLastStates.delete(payload.new.id);
+            if (engineRef.current) {
+              engineRef.current.removePlayer(payload.new.id);
+            }
+          }
+          return;
+        }
+
+        const now = Date.now();
+        const lastState = playerLastStates.get(payload.new.id);
+        const minTimeBetweenUpdates = 50; // ms
+
+        // Check if this is a meaningful update we should process
+        const isSignificantUpdate =
+          !lastState ||
+          // Significant position change
+          Math.abs(lastState.x - payload.new.position_x) > 0.1 ||
+          Math.abs(lastState.y - payload.new.position_y) > 0.1 ||
+          Math.abs(lastState.z - payload.new.position_z) > 0.1 ||
+          // State change
+          lastState.isJumping !== payload.new.is_jumping ||
+          lastState.isCrouching !== payload.new.is_crouching ||
+          // Health change
+          lastState.health !== payload.new.health ||
+          // Timeout - process update regardless if it's been a while
+          now - lastState.lastUpdateTime > 500;
+
+        // Skip if not significant and we received the update too quickly
+        if (
+          lastState &&
+          !isSignificantUpdate &&
+          now - lastState.lastUpdateTime < minTimeBetweenUpdates
+        ) {
+          return;
+        }
+
+        // Log only real jumping or crouching state changes
+        if (
+          lastState &&
+          (lastState.isJumping !== payload.new.is_jumping ||
+            lastState.isCrouching !== payload.new.is_crouching)
+        ) {
+          console.log(
+            `Player ${payload.new.id} state change: jumping=${payload.new.is_jumping}, crouching=${payload.new.is_crouching}`
+          );
+        }
+
         const player: Player = {
           id: payload.new.id,
           name: payload.new.name,
@@ -133,6 +209,24 @@ export function GameContainer() {
           deaths: payload.new.deaths,
           lastUpdated: new Date(payload.new.last_updated).getTime(),
         };
+
+        // Update our tracking of the player's last state
+        playerLastStates.set(payload.new.id, {
+          isJumping: payload.new.is_jumping,
+          isCrouching: payload.new.is_crouching,
+          x: payload.new.position_x,
+          y: payload.new.position_y,
+          z: payload.new.position_z,
+          health: payload.new.health,
+          lastUpdateTime: now,
+        });
+
+        // Immediately update the player in the game engine
+        if (engineRef.current) {
+          engineRef.current.updatePlayer(player);
+        }
+
+        // Update player in state
         setOtherPlayers((prev) => {
           const filtered = prev.filter((p) => p.id !== player.id);
           return [...filtered, player];
@@ -145,7 +239,7 @@ export function GameContainer() {
     return () => {
       subscription?.unsubscribe();
     };
-  }, [localPlayer?.id]);
+  }, [localPlayer?.id, engineRef.current]);
 
   // Setup subscription for projectiles from other players
   useEffect(() => {
@@ -257,25 +351,71 @@ export function GameContainer() {
   useEffect(() => {
     if (!isPlaying || !localPlayer || !engineRef.current) return;
 
+    let lastPositionUpdate = {
+      x: 0,
+      y: 0,
+      z: 0,
+      time: 0,
+    };
+
+    const minMovementThreshold = 0.05; // Minimum movement before sending update
+    const minUpdateInterval = 200; // Minimum time between updates in ms
+
     const interval = setInterval(() => {
       if (engineRef.current) {
         const camera = engineRef.current.getCamera();
         if (camera) {
-          localPlayer.position = {
-            x: camera.position.x,
-            y: camera.position.y,
-            z: camera.position.z,
-          };
-          localPlayer.rotation = {
-            x: camera.rotation.x,
-            y: camera.rotation.y,
-            z: camera.rotation.z,
-          };
-          localPlayer.lastUpdated = Date.now();
-          sendPlayerUpdate(localPlayer);
+          const now = Date.now();
+
+          // Calculate distance moved since last update
+          const distMoved = Math.sqrt(
+            Math.pow(camera.position.x - lastPositionUpdate.x, 2) +
+              Math.pow(camera.position.z - lastPositionUpdate.z, 2)
+          );
+
+          // Only update if moved enough or enough time has passed
+          const shouldUpdate =
+            distMoved > minMovementThreshold ||
+            now - lastPositionUpdate.time > 1000; // Force update after 1 second
+
+          if (shouldUpdate && !localPlayer.isJumping) {
+            // Update local player state with current position
+            const updatedPlayer = {
+              ...localPlayer,
+              position: {
+                x: camera.position.x,
+                y: camera.position.y,
+                z: camera.position.z,
+              },
+              rotation: {
+                x: camera.rotation.x,
+                y: camera.rotation.y,
+                z: camera.rotation.z,
+              },
+              lastUpdated: now,
+            };
+
+            // Update local state
+            setLocalPlayer(updatedPlayer);
+
+            // Only if enough time has passed since last network update
+            if (now - lastPositionUpdate.time >= minUpdateInterval) {
+              // Send to server but only during regular movement, not during jumps
+              // (jumps are handled directly in the engine.ts with more frequent updates)
+              sendPlayerUpdate(updatedPlayer);
+
+              // Remember this position and time
+              lastPositionUpdate = {
+                x: camera.position.x,
+                y: camera.position.y,
+                z: camera.position.z,
+                time: now,
+              };
+            }
+          }
         }
       }
-    }, 100); // Update every 100ms
+    }, 100); // Check position every 100ms
 
     return () => clearInterval(interval);
   }, [isPlaying, localPlayer]);
@@ -519,7 +659,10 @@ export function GameContainer() {
     if (!supabaseRef.current) return;
     try {
       console.log("Deleting player on exit:", playerId);
-      await supabaseRef.current.from("players").delete().eq("id", playerId);
+
+      // Use the new proper deletePlayer function
+      const { deletePlayer } = await import("@/lib/supabase/client");
+      await deletePlayer(playerId);
     } catch (error) {
       console.error("Error deleting player on exit:", error);
     }

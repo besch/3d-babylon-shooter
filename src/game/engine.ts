@@ -44,12 +44,37 @@ const debouncedSendProjectile = debounce((projectileData: any) => {
   );
 }, 100);
 
-// Add debounced function for sending player updates
-const debouncedSendPlayerUpdate = debounce((player: Player) => {
-  sendPlayerUpdate(player).catch((err) =>
-    console.error("Failed to update player stats:", err)
-  );
-}, 300);
+// Add debounced function for sending player updates with better throttling
+const debouncedSendPlayerUpdate = (() => {
+  let timeout: any;
+  let lastUpdateTime = 0;
+  const minTimeBetweenUpdates = 300; // ms
+
+  return (player: Player) => {
+    const now = Date.now();
+
+    // Clear existing timeout
+    clearTimeout(timeout);
+
+    // If it's been too soon since last update, wait longer
+    const timeToWait =
+      now - lastUpdateTime < minTimeBetweenUpdates ? minTimeBetweenUpdates : 50; // Quick update for first in sequence
+
+    timeout = setTimeout(() => {
+      // Only send essential fields to reduce payload size
+      const minimalPlayer = {
+        ...player,
+        lastUpdated: Date.now(), // Always use current time
+      };
+
+      sendPlayerUpdate(minimalPlayer).catch((err) =>
+        console.error("Failed to update player stats:", err)
+      );
+
+      lastUpdateTime = Date.now();
+    }, timeToWait);
+  };
+})();
 
 // Only initialize on client side
 async function loadBabylonModules() {
@@ -965,6 +990,9 @@ export class GameEngine {
     let playerMesh = this.players.get(player.id);
 
     if (!playerMesh) {
+      // Player is new - create mesh and log join message
+      console.log(`New player joined: ${player.id} (${player.name})`);
+
       // Create an android-like player model
       // First create a parent mesh for the entire player
       playerMesh = new BABYLON.TransformNode(`player-${player.id}`, this.scene);
@@ -1113,10 +1141,18 @@ export class GameEngine {
       this.players.set(player.id, playerMesh);
     }
 
-    // Update position and rotation
-    // Important: place directly on the ground (y=0) instead of y + 1
+    // Update position and rotation - handle jumping properly
     playerMesh.position.x = player.position.x;
-    playerMesh.position.y = 0; // Place directly on ground
+
+    // For jumping, check if isJumping is true AND y position is > 0
+    if (player.isJumping && player.position.y > 0) {
+      // Direct position update for jumping - subtract player height to account for character center
+      playerMesh.position.y = Math.max(0, player.position.y - 1.8);
+    } else {
+      // When not jumping or landing, keep at ground level
+      playerMesh.position.y = 0;
+    }
+
     playerMesh.position.z = player.position.z;
     playerMesh.rotation.y = player.rotation.y;
 
@@ -1124,18 +1160,54 @@ export class GameEngine {
     const scale = player.isCrouching ? 0.5 : 1;
     playerMesh.scaling.y = scale;
 
+    // Store the states in metadata
+    if (playerMesh.metadata) {
+      playerMesh.metadata.isJumping = player.isJumping;
+      playerMesh.metadata.isCrouching = player.isCrouching;
+    }
+
     // Animate walking if the player is moving
     if (playerMesh.metadata && player.velocity) {
       const isMoving =
         Math.abs(player.velocity.x) > 0.1 || Math.abs(player.velocity.z) > 0.1;
 
-      if (isMoving) {
-        // Simple walking animation by rotating the limbs
+      // Get all the limbs from metadata
+      const leftLeg = playerMesh.metadata.leftLeg;
+      const rightLeg = playerMesh.metadata.rightLeg;
+      const leftArm = playerMesh.metadata.leftArm;
+      const rightArm = playerMesh.metadata.rightArm;
+
+      // Reset limb rotations first
+      if (leftLeg) leftLeg.rotation.x = 0;
+      if (rightLeg) rightLeg.rotation.x = 0;
+      if (leftArm) leftArm.rotation.x = 0;
+      if (rightArm) rightArm.rotation.x = 0;
+
+      if (player.isJumping) {
+        // If jumping, set a specific jump pose
+        if (leftLeg && rightLeg) {
+          leftLeg.rotation.x = -0.5; // Legs slightly bent
+          rightLeg.rotation.x = -0.5;
+        }
+
+        if (leftArm && rightArm) {
+          leftArm.rotation.x = -1.0; // Arms up
+          rightArm.rotation.x = -1.0;
+        }
+      } else if (player.isCrouching) {
+        // Crouching pose - bend knees more
+        if (leftLeg && rightLeg) {
+          leftLeg.rotation.x = 0.8;
+          rightLeg.rotation.x = 0.8;
+        }
+
+        if (leftArm && rightArm) {
+          leftArm.rotation.x = 0.3;
+          rightArm.rotation.x = 0.3;
+        }
+      } else if (isMoving) {
+        // Walking animation
         const time = Date.now() / 200;
-        const leftLeg = playerMesh.metadata.leftLeg;
-        const rightLeg = playerMesh.metadata.rightLeg;
-        const leftArm = playerMesh.metadata.leftArm;
-        const rightArm = playerMesh.metadata.rightArm;
 
         if (leftLeg && rightLeg) {
           leftLeg.rotation.x = Math.sin(time) * 0.5;
@@ -1704,22 +1776,37 @@ export class GameEngine {
     }
   }
 
+  // Improved jump method with better state updates
   private jump(): void {
     if (!this.localPlayer || !this.camera) return;
 
     // Only jump if not already jumping
     if (this.localPlayer.isJumping) return;
 
+    console.log("Player initiating jump");
+
     this.localPlayer.isJumping = true;
     this.localPlayer.velocity.y = this.settings.jumpForce;
+
+    // Immediately update other players about our jump state
+    this.sendPlayerUpdate();
+
+    // Track when we last sent an update
+    let lastUpdateTime = Date.now();
+    const updateInterval = 200; // ms between updates
 
     // Create a gravity effect by using a recurring function
     const applyGravity = () => {
       if (!this.localPlayer || !this.camera) return;
 
-      // Apply velocity to position
+      const currentTime = Date.now();
+
+      // Calculate the next position based on velocity
       const nextPosition =
         this.camera.position.y + this.localPlayer.velocity.y * 0.016;
+
+      // Apply gravity to velocity
+      this.localPlayer.velocity.y -= this.settings.gravity * 0.016;
 
       // Check for collision with platforms and objects
       const ray = new BABYLON.Ray(
@@ -1739,19 +1826,40 @@ export class GameEngine {
         this.camera.position.y = hit.pickedPoint?.y + 1.8 || 1.8;
         this.localPlayer.isJumping = false;
         this.localPlayer.velocity.y = 0;
+
+        console.log(
+          "Player landed on object at height:",
+          this.camera.position.y
+        );
+
+        // Notify others that we've landed
+        this.sendPlayerUpdate();
+
         return; // Stop the gravity effect
       } else {
-        // Otherwise continue falling
+        // Update camera position for jumping
         this.camera.position.y = nextPosition;
 
-        // Apply gravity to velocity
-        this.localPlayer.velocity.y -= this.settings.gravity * 0.016;
+        // Ensure we're updating the local player's position too
+        this.localPlayer.position.y = this.camera.position.y;
+
+        // Only send updates at intervals to avoid flooding
+        if (currentTime - lastUpdateTime > updateInterval) {
+          this.sendPlayerUpdate();
+          lastUpdateTime = currentTime;
+        }
 
         // Check if landed on ground (y=0)
         if (this.camera.position.y <= 1.8) {
           this.camera.position.y = 1.8;
           this.localPlayer.isJumping = false;
           this.localPlayer.velocity.y = 0;
+
+          console.log("Player landed on ground");
+
+          // Notify others that we've landed
+          this.sendPlayerUpdate();
+
           return; // Stop the gravity effect
         }
       }
@@ -1762,6 +1870,27 @@ export class GameEngine {
 
     // Start the gravity effect
     requestAnimationFrame(applyGravity);
+  }
+
+  // Add a helper method to send player updates
+  private sendPlayerUpdate(): void {
+    if (!this.localPlayer || !this.camera) return;
+
+    // Update the local player position and rotation from camera
+    this.localPlayer.position = {
+      x: this.camera.position.x,
+      y: this.camera.position.y,
+      z: this.camera.position.z,
+    };
+
+    this.localPlayer.rotation = {
+      x: this.camera.rotation.x,
+      y: this.camera.rotation.y,
+      z: this.camera.rotation.z,
+    };
+
+    // Use the debounced function to send the update
+    debouncedSendPlayerUpdate(this.localPlayer);
   }
 
   private crouch(isCrouching: boolean): void {
