@@ -1,10 +1,55 @@
 // Use conditional imports to avoid document issues during SSR
 import { Player, GameSettings, MapObject } from "./types";
+import {
+  updatePlayerHealth,
+  incrementPlayerKills,
+  incrementPlayerDeaths,
+  sendPlayerUpdate,
+  sendProjectile,
+} from "@/lib/supabase/client";
 
 // Define types to avoid missing BABYLON reference
 let BABYLON: any = null;
 let GUI: any = null;
 let cannonModule: any = null;
+
+// Add a debounce implementation to prevent too many API calls
+function debounce<T extends (...args: any[]) => any>(
+  func: T,
+  wait: number
+): (...args: Parameters<T>) => void {
+  let timeout: any;
+  return function (this: any, ...args: Parameters<T>) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func.apply(this, args), wait);
+  };
+}
+
+// Debounced update functions
+const debouncedUpdateHealth = debounce((playerId: string, health: number) => {
+  updatePlayerHealth(playerId, health).catch((err) =>
+    console.error("Failed to update player health:", err)
+  );
+}, 300);
+
+const debouncedIncrementKills = debounce((playerId: string) => {
+  incrementPlayerKills(playerId).catch((err) =>
+    console.error("Failed to increment kills:", err)
+  );
+}, 300);
+
+const debouncedSendProjectile = debounce((projectileData: any) => {
+  sendProjectile(projectileData).catch((err) =>
+    console.error("Failed to send projectile:", err)
+  );
+}, 100);
+
+// Add debounced function for sending player updates
+const debouncedSendPlayerUpdate = debounce((player: Player) => {
+  sendPlayerUpdate(player).catch((err) =>
+    console.error("Failed to update player stats:", err)
+  );
+}, 300);
 
 // Only initialize on client side
 async function loadBabylonModules() {
@@ -637,10 +682,15 @@ export class GameEngine {
       const speed = this.settings.projectileSpeed;
       const velocity = direction.scale(speed);
 
+      // Calculate integer damage value
+      const damageValue = Math.floor(
+        this.settings.maxHealth / this.settings.shootsToKill
+      );
+
       // Store the shooter ID for hit detection
       projectile.metadata = {
         shooterId: this.localPlayer.id,
-        damage: this.settings.maxHealth / this.settings.shootsToKill,
+        damage: damageValue,
         velocity: velocity,
       };
 
@@ -725,9 +775,6 @@ export class GameEngine {
     if (!this.localPlayer || !this.camera) return;
 
     try {
-      // Dynamically import to avoid circular dependencies
-      const { sendProjectile } = await import("@/lib/supabase/client");
-
       // Format the data according to the expected schema
       const projectileData = {
         id: projectileId,
@@ -741,8 +788,8 @@ export class GameEngine {
         created_at: new Date().toISOString(),
       };
 
-      // Send projectile data to other players
-      await sendProjectile(projectileData);
+      // Use the debounced function to send projectile data
+      debouncedSendProjectile(projectileData);
     } catch (err) {
       console.error("Failed to send projectile data:", err);
     }
@@ -752,44 +799,74 @@ export class GameEngine {
    * Apply damage to a player
    */
   private damagePlayer(playerId: string, damage: number): void {
-    // Find the player in other players list
-    const playerToUpdate = this.players.get(playerId);
-    if (!playerToUpdate || !playerToUpdate.metadata) return;
-
-    const currentHealth = playerToUpdate.metadata.health;
-    const newHealth = Math.max(0, currentHealth - damage);
-
-    // Update the player's health locally
-    playerToUpdate.metadata.health = newHealth;
-
-    // If player has no health left, it's a kill
-    if (newHealth <= 0) {
-      // Increment local player kills
-      if (this.localPlayer) {
-        this.localPlayer.kills += 1;
-      }
-
-      // Show kill effect
-      this.showKillEffect(playerToUpdate.position);
-
-      // Respawn player after a delay
-      setTimeout(() => {
-        if (playerToUpdate && !playerToUpdate.isDisposed()) {
-          playerToUpdate.metadata.health = this.settings.maxHealth;
-
-          // Move the player to a random position
-          const respawnPos = this.getRandomSpawnPosition();
-          playerToUpdate.position = new BABYLON.Vector3(
-            respawnPos.x,
-            respawnPos.y + 1,
-            respawnPos.z
-          );
-        }
-      }, this.settings.respawnTime);
+    // Validate player ID
+    if (!playerId || playerId === this.localPlayer?.id) {
+      return; // Don't damage self or invalid players
     }
 
-    // Notify the server about the damage
-    this.emitPlayerDamage(playerId, newHealth);
+    // Find the player in other players list
+    const playerToUpdate = this.players.get(playerId);
+    if (!playerToUpdate || !playerToUpdate.metadata) {
+      console.warn(`Player ${playerId} not found or has no metadata`);
+      return;
+    }
+
+    try {
+      // Ensure we have an integer for current health
+      const currentHealth = Math.floor(
+        playerToUpdate.metadata.health || this.settings.maxHealth
+      );
+
+      // Calculate new health as integer
+      const newHealth = Math.max(0, currentHealth - Math.floor(damage));
+      console.log(
+        `Player ${playerId} hit: Health ${currentHealth} -> ${newHealth} (damage: ${Math.floor(
+          damage
+        )})`
+      );
+
+      // Update the player's health locally
+      playerToUpdate.metadata.health = newHealth;
+
+      // If player has no health left, it's a kill
+      if (newHealth <= 0) {
+        // Increment local player kills
+        if (this.localPlayer) {
+          this.localPlayer.kills += 1;
+          console.log(
+            `Kill registered: ${this.localPlayer.id} killed ${playerId}`
+          );
+        }
+
+        // Show kill effect
+        this.showKillEffect(playerToUpdate.position);
+
+        // Respawn player after a delay
+        setTimeout(() => {
+          if (playerToUpdate && !playerToUpdate.isDisposed()) {
+            // Reset health to max (integer value)
+            playerToUpdate.metadata.health = Math.floor(
+              this.settings.maxHealth
+            );
+
+            // Move the player to a random position
+            const respawnPos = this.getRandomSpawnPosition();
+            playerToUpdate.position = new BABYLON.Vector3(
+              respawnPos.x,
+              respawnPos.y + 1,
+              respawnPos.z
+            );
+          }
+        }, this.settings.respawnTime);
+      }
+
+      // Notify the server about the damage
+      this.emitPlayerDamage(playerId, newHealth).catch((err) =>
+        console.error("Failed to emit player damage:", err)
+      );
+    } catch (error) {
+      console.error("Error in damagePlayer:", error);
+    }
   }
 
   /**
@@ -845,17 +922,18 @@ export class GameEngine {
     newHealth: number
   ): Promise<void> {
     try {
-      // Dynamically import to avoid circular dependencies
-      const { updatePlayerHealth, incrementPlayerKills } = await import(
-        "@/lib/supabase/client"
-      );
+      // Check if the player ID is valid UUID
+      if (!playerId || playerId.length !== 36) {
+        console.error("Invalid player ID:", playerId);
+        return;
+      }
 
-      // Update the player's health on the server
-      await updatePlayerHealth(playerId, newHealth);
+      // Use the debounced update function instead of direct call
+      debouncedUpdateHealth(playerId, newHealth);
 
       // If the player died, update the kill count for the local player
       if (newHealth <= 0 && this.localPlayer) {
-        await incrementPlayerKills(this.localPlayer.id);
+        debouncedIncrementKills(this.localPlayer.id);
       }
     } catch (err) {
       console.error("Failed to update player damage on server:", err);
@@ -1908,10 +1986,15 @@ export class GameEngine {
     const speed = this.settings.projectileSpeed;
     const velocity = direction.normalize().scale(speed);
 
+    // Calculate integer damage value
+    const damageValue = Math.floor(
+      this.settings.maxHealth / this.settings.shootsToKill
+    );
+
     // Store metadata
     projectile.metadata = {
       shooterId: projectileData.playerId,
-      damage: this.settings.maxHealth / this.settings.shootsToKill,
+      damage: damageValue,
       velocity: velocity,
     };
 
@@ -1939,12 +2022,13 @@ export class GameEngine {
               projectile.metadata.shooterId
             );
 
-            // Reduce local player health
+            // Reduce local player health (ensure integer value)
             if (this.localPlayer) {
-              this.localPlayer.health = Math.max(
+              const newHealth = Math.max(
                 0,
                 this.localPlayer.health - projectile.metadata.damage
               );
+              this.localPlayer.health = Math.floor(newHealth);
 
               // If player died, increment the shooter's kill count
               if (this.localPlayer.health <= 0) {
@@ -2037,11 +2121,8 @@ export class GameEngine {
     try {
       if (!this.localPlayer) return;
 
-      // Import the update function dynamically
-      const { sendPlayerUpdate } = await import("@/lib/supabase/client");
-
-      // Send the updated local player to the server
-      await sendPlayerUpdate(this.localPlayer);
+      // Use debounced function instead of direct import
+      debouncedSendPlayerUpdate(this.localPlayer);
     } catch (err) {
       console.error("Failed to update local player stats:", err);
     }

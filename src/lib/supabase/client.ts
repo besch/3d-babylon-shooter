@@ -192,13 +192,34 @@ export async function updatePlayerHealth(playerId: string, newHealth: number) {
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
-  return supabase
-    .from("players")
-    .update({
-      health: newHealth,
+  try {
+    // Ensure health is an integer as required by the database schema
+    const healthValue = Math.round(newHealth);
+    console.log(
+      `Updating player ${playerId} health to ${healthValue} (rounded from ${newHealth})`
+    );
+
+    // Format data strictly according to the database schema
+    const updateData = {
+      health: healthValue,
       last_updated: new Date().toISOString(),
-    })
-    .eq("id", playerId);
+    };
+
+    const { data, error } = await supabase
+      .from("players")
+      .update(updateData)
+      .eq("id", playerId);
+
+    if (error) {
+      console.error("Error updating player health:", error);
+      return { data: null, error };
+    }
+
+    return { data, error: null };
+  } catch (err) {
+    console.error("Exception updating player health:", err);
+    return { data: null, error: err };
+  }
 }
 
 /**
@@ -206,24 +227,43 @@ export async function updatePlayerHealth(playerId: string, newHealth: number) {
  */
 export async function incrementPlayerDeaths(playerId: string) {
   const supabase = getSupabaseClient();
-  if (!supabase) return;
+  if (!supabase) return { data: null, error: "Supabase client not available" };
 
-  // First get current deaths count
-  const { data } = await supabase
-    .from("players")
-    .select("deaths")
-    .eq("id", playerId)
-    .single();
+  try {
+    // First get current deaths count
+    const { data, error } = await supabase
+      .from("players")
+      .select("deaths")
+      .eq("id", playerId)
+      .single();
 
-  if (data) {
+    if (error) {
+      console.error("Error fetching player deaths:", error);
+      return { data: null, error };
+    }
+
+    if (!data) {
+      console.error("Player not found:", playerId);
+      return { data: null, error: "Player not found" };
+    }
+
     // Increment deaths count
-    return supabase
+    const updateResult = await supabase
       .from("players")
       .update({
-        deaths: data.deaths + 1,
+        deaths: (data.deaths || 0) + 1,
         last_updated: new Date().toISOString(),
       })
       .eq("id", playerId);
+
+    if (updateResult.error) {
+      console.error("Error incrementing deaths:", updateResult.error);
+    }
+
+    return updateResult;
+  } catch (err) {
+    console.error("Exception incrementing deaths:", err);
+    return { data: null, error: err };
   }
 }
 
@@ -232,23 +272,42 @@ export async function incrementPlayerDeaths(playerId: string) {
  */
 export async function incrementPlayerKills(playerId: string) {
   const supabase = getSupabaseClient();
-  if (!supabase) return;
+  if (!supabase) return { data: null, error: "Supabase client not available" };
 
-  // First get current kills count
-  const { data } = await supabase
-    .from("players")
-    .select("kills")
-    .eq("id", playerId)
-    .single();
+  try {
+    // First get current kills count
+    const { data, error } = await supabase
+      .from("players")
+      .select("kills")
+      .eq("id", playerId)
+      .single();
 
-  if (data) {
+    if (error) {
+      console.error("Error fetching player kills:", error);
+      return { data: null, error };
+    }
+
+    if (!data) {
+      console.error("Player not found:", playerId);
+      return { data: null, error: "Player not found" };
+    }
+
     // Increment kills count
-    return supabase
+    const updateResult = await supabase
       .from("players")
       .update({
-        kills: data.kills + 1,
+        kills: (data.kills || 0) + 1,
         last_updated: new Date().toISOString(),
       })
       .eq("id", playerId);
+
+    if (updateResult.error) {
+      console.error("Error incrementing kills:", updateResult.error);
+    }
+
+    return updateResult;
+  } catch (err) {
+    console.error("Exception incrementing kills:", err);
+    return { data: null, error: err };
   }
 }
