@@ -75,10 +75,30 @@ async function loadAudioBuffer(url: string, name: string): Promise<void> {
   try {
     if (debugSound) console.log(`Loading fallback sound: ${name} from ${url}`);
     const response = await fetch(url);
+
+    if (!response.ok) {
+      console.error(
+        `Failed to fetch sound ${name}: ${response.status} ${response.statusText}`
+      );
+      return Promise.reject(new Error(`HTTP error ${response.status}`));
+    }
+
     const arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength === 0) {
+      console.error(`Empty array buffer for sound ${name}`);
+      return Promise.reject(new Error("Empty buffer"));
+    }
+
+    console.log(
+      `Decoding audio data for ${name}, buffer size: ${arrayBuffer.byteLength} bytes`
+    );
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
     audioBuffers[name] = audioBuffer;
-    console.log(`Fallback sound loaded: ${name}`);
+    console.log(
+      `Fallback sound loaded: ${name}, duration: ${audioBuffer.duration.toFixed(
+        2
+      )}s`
+    );
     return Promise.resolve();
   } catch (error: any) {
     console.error(`Error loading fallback sound ${name}:`, error);
@@ -950,14 +970,21 @@ export class GameEngine {
       if (newHealth <= 0) {
         // Play death sound for nearby players with better error handling
         try {
-          if (soundDie) {
+          if (useFallbackAudio) {
+            console.log("Playing death sound using fallback audio");
+            playFallbackSound("die");
+          } else if (soundDie) {
+            console.log("Playing death sound using Babylon audio");
             soundDie.play();
-            console.log("Playing death sound");
           } else {
             console.warn("Death sound not loaded");
+            // Try fallback anyway
+            playFallbackSound("die");
           }
         } catch (error) {
           console.error("Error playing death sound:", error);
+          // Try fallback as last resort
+          playFallbackSound("die");
         }
 
         // Increment local player kills
@@ -2278,14 +2305,28 @@ export class GameEngine {
               if (this.localPlayer.health <= 0) {
                 // Play death sound
                 try {
-                  if (soundDie) {
+                  if (useFallbackAudio) {
+                    console.log(
+                      "Playing death sound using fallback audio (local player)"
+                    );
+                    playFallbackSound("die");
+                  } else if (soundDie) {
+                    console.log(
+                      "Playing death sound using Babylon audio (local player)"
+                    );
                     soundDie.play();
-                    console.log("Playing death sound for local player");
                   } else {
-                    console.warn("Death sound not loaded");
+                    console.warn("Death sound not loaded (local player)");
+                    // Try fallback anyway
+                    playFallbackSound("die");
                   }
                 } catch (error) {
-                  console.error("Error playing death sound:", error);
+                  console.error(
+                    "Error playing death sound (local player):",
+                    error
+                  );
+                  // Try fallback as last resort
+                  playFallbackSound("die");
                 }
 
                 // Reset health and teleport
@@ -2597,6 +2638,8 @@ export class GameEngine {
 
     // Previous position to track movement
     let prevPosition = { x: 0, z: 0 };
+    let lastSoundTime = 0;
+    const MIN_SOUND_INTERVAL = 1000; // Minimum time in ms between run sounds (1 second)
 
     // Track player movement to trigger run sound
     this.scene.registerBeforeRender(() => {
@@ -2626,61 +2669,48 @@ export class GameEngine {
       if (isMovingNow && !isRunning) {
         isRunning = true;
 
-        // Play run sound at intervals while moving
-        if (!runSoundInterval) {
-          // Play sound immediately when starting to run
-          if (soundRun && !soundRun.isPlaying) {
+        // Clear any existing interval to be safe
+        if (runSoundInterval) {
+          clearInterval(runSoundInterval);
+          runSoundInterval = null;
+        }
+
+        // Play a single run sound immediately
+        const now = Date.now();
+        if (now - lastSoundTime >= MIN_SOUND_INTERVAL) {
+          lastSoundTime = now;
+          if (useFallbackAudio) {
+            playFallbackSound("run");
+          } else if (soundRun && !soundRun.isPlaying) {
             try {
-              if (useFallbackAudio) {
-                playFallbackSound("run");
-              } else {
-                const promise = soundRun.play();
-                // Only call .then() and .catch() if promise is actually a Promise
-                if (promise && typeof promise.then === "function") {
-                  promise
-                    .then(() => {
-                      console.log("Run sound played successfully");
-                    })
-                    .catch((error: any) => {
-                      console.error("Could not play run sound:", error);
-                      playFallbackSound("run");
-                      useFallbackAudio = true;
-                    });
-                }
-              }
+              soundRun.play();
             } catch (error) {
               console.error("Error playing run sound:", error);
-              if (useFallbackAudio) {
-                playFallbackSound("run");
-              }
+              playFallbackSound("run");
             }
           }
+        }
 
-          // Then repeat at regular intervals
-          runSoundInterval = setInterval(() => {
-            if (!isRunning) return;
+        // Set up interval to play run sound at appropriate intervals
+        runSoundInterval = setInterval(() => {
+          if (!isRunning) return;
+
+          const currentTime = Date.now();
+          if (currentTime - lastSoundTime >= MIN_SOUND_INTERVAL) {
+            lastSoundTime = currentTime;
 
             if (useFallbackAudio) {
               playFallbackSound("run");
             } else if (soundRun && !soundRun.isPlaying) {
               try {
-                const promise = soundRun.play();
-                // Only call .catch() if promise is actually a Promise
-                if (promise && typeof promise.catch === "function") {
-                  promise.catch((error: any) => {
-                    console.error("Could not play run sound:", error);
-                    playFallbackSound("run");
-                    useFallbackAudio = true;
-                  });
-                }
+                soundRun.play();
               } catch (error) {
-                console.error("Error in run sound interval:", error);
+                console.error("Error playing run sound:", error);
                 playFallbackSound("run");
-                useFallbackAudio = true;
               }
             }
-          }, 350); // Footstep interval
-        }
+          }
+        }, MIN_SOUND_INTERVAL); // Use the minimum sound interval
       }
       // Stop run sound if stopped moving
       else if (!isMovingNow && isRunning) {
