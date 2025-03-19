@@ -840,9 +840,11 @@ export function GameContainer() {
       {/* Show menu when not playing */}
       {!isPlaying && (
         <div className="flex flex-col items-center justify-center space-y-4 p-6 bg-slate-900 rounded-lg">
-          <h1 className="text-3xl font-bold mb-6 text-white">Tech Wars: FPS</h1>
+          <h1 className="text-3xl font-bold mb-6 text-white">
+            Awesome Shooter
+          </h1>
 
-          <div className="mb-4 flex items-center">
+          {/* <div className="mb-4 flex items-center">
             <p className="text-white mr-4">Playing as:</p>
             <div className="flex items-center space-x-2">
               <Button onClick={changePlayerName} variant="outline">
@@ -864,7 +866,7 @@ export function GameContainer() {
                 Debug Mode
               </label>
             </div>
-          </div>
+          </div> */}
 
           {error && (
             <div className="p-3 mb-4 text-red-500 bg-red-100 rounded-md border border-red-300 w-full">
