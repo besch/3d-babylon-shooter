@@ -13,6 +13,14 @@ let BABYLON: any = null;
 let GUI: any = null;
 let cannonModule: any = null;
 
+// Define sound objects
+let soundShoot: any = null;
+let soundJump: any = null;
+let soundRun: any = null;
+let soundDie: any = null;
+let isRunning: boolean = false;
+let runSoundInterval: any = null;
+
 // Add a debounce implementation to prevent too many API calls
 function debounce<T extends (...args: any[]) => any>(
   func: T,
@@ -117,7 +125,7 @@ async function loadBabylonModules() {
 
 export const DEFAULT_GAME_SETTINGS: GameSettings = {
   maxHealth: 100,
-  shootsToKill: 3,
+  shootsToKill: 3, // Exactly 3 shots should kill
   respawnTime: 3000, // 3 seconds
   recoilForce: 0.5,
   projectileSpeed: 100,
@@ -142,6 +150,13 @@ export class GameEngine {
   private walls: any[] = [];
   private crosshair: any;
   private mapObjects: Map<string, any> = new Map();
+  private skybox: any;
+  // Add event callback for local player hit
+  private onLocalPlayerHitCallback: ((newHealth: number) => void) | null = null;
+  // Add callback for player stats updates (kills/deaths)
+  public onPlayerStatsUpdate:
+    | ((stats: { kills?: number; deaths?: number }) => void)
+    | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -150,6 +165,11 @@ export class GameEngine {
     console.log("GameEngine constructor called");
     this.canvas = canvas;
     this.settings = settings;
+  }
+
+  // Add method to set the callback
+  public onLocalPlayerHit(callback: (newHealth: number) => void): void {
+    this.onLocalPlayerHitCallback = callback;
   }
 
   async initialize(): Promise<boolean> {
@@ -191,7 +211,7 @@ export class GameEngine {
       this.camera.minZ = 0.1;
       this.camera.inertia = 0.3; // Lower inertia for smoother movement
       this.camera.angularSensibility = 500; // Adjust sensitivity for camera rotation
-      this.camera.speed = 0.75; // Adjust movement speed
+      this.camera.speed = 2.25; // Increase movement speed by 3x (from original 0.75)
 
       // Add a gravity force to keep player on the ground
       const gravity = new BABYLON.Vector3(0, -this.settings.gravity, 0);
@@ -243,25 +263,21 @@ export class GameEngine {
       );
       this.light.intensity = 0.7;
 
-      // Ground setup
-      console.log("Creating ground");
-      this.ground = BABYLON.MeshBuilder.CreateGround(
-        "ground",
-        { width: 100, height: 100 },
-        this.scene
-      );
-      this.ground.checkCollisions = true;
+      // Create skybox with warm blue color and clouds
+      this.createSkybox();
 
-      const groundMaterial = new BABYLON.StandardMaterial(
-        "groundMaterial",
-        this.scene
-      );
-      groundMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.3);
-      groundMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
-      this.ground.material = groundMaterial;
+      // Ground setup - changed to light grey with texture
+      console.log("Creating ground");
+      this.createGround();
 
       // Create boundaries
       this.createBoundaries();
+
+      // Load sounds
+      this.loadSounds();
+
+      // Setup running sound based on movement
+      this.setupRunSound();
 
       // Recoil animation
       console.log("Setting up weapon animations");
@@ -301,6 +317,267 @@ export class GameEngine {
       console.error("Error during game engine initialization:", error);
       return false;
     }
+  }
+
+  private createSkybox(): void {
+    if (!BABYLON || !this.scene) return;
+
+    // Create a skybox
+    this.skybox = BABYLON.MeshBuilder.CreateBox(
+      "skyBox",
+      { size: 1000.0 },
+      this.scene
+    );
+    const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
+    skyboxMaterial.backFaceCulling = false;
+
+    // Create a dynamic texture for the skybox with warm blue color and clouds
+    const resolution = 1024;
+    const skyTexture = new BABYLON.DynamicTexture(
+      "skyTexture",
+      { width: resolution, height: resolution },
+      this.scene
+    );
+    const ctx = skyTexture.getContext();
+
+    // Create warm blue gradient background
+    const grd = ctx.createLinearGradient(0, 0, 0, resolution);
+    grd.addColorStop(0, "#5d8cc2"); // Warm blue at top
+    grd.addColorStop(1, "#a7c5e3"); // Lighter blue at horizon
+
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, resolution, resolution);
+
+    // Add some cloud patterns
+    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+
+    // Create random clouds
+    for (let i = 0; i < 20; i++) {
+      const x = Math.random() * resolution;
+      const y = Math.random() * (resolution / 3); // Keep clouds in upper third
+      const size = 50 + Math.random() * 100;
+
+      // Draw a fluffy cloud (multiple overlapping circles)
+      for (let j = 0; j < 5; j++) {
+        const offsetX = (Math.random() - 0.5) * size * 0.6;
+        const offsetY = (Math.random() - 0.5) * size * 0.3;
+        const radius = size * 0.3 + Math.random() * size * 0.2;
+
+        ctx.beginPath();
+        ctx.arc(x + offsetX, y + offsetY, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    skyTexture.update();
+
+    // Apply the texture to all sides of the skybox
+    skyboxMaterial.reflectionTexture = skyTexture;
+    skyboxMaterial.reflectionTexture.coordinatesMode =
+      BABYLON.Texture.SKYBOX_MODE;
+    skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+    skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+    this.skybox.material = skyboxMaterial;
+
+    // Make sure the skybox follows the camera
+    this.skybox.infiniteDistance = true;
+  }
+
+  private createGround(): void {
+    if (!BABYLON || !this.scene) return;
+
+    // Create a larger ground with a light grey texture
+    this.ground = BABYLON.MeshBuilder.CreateGround(
+      "ground",
+      { width: 200, height: 200 },
+      this.scene
+    );
+    this.ground.checkCollisions = true;
+
+    // Raise the ground slightly to prevent z-fighting
+    this.ground.position.y = 0.01;
+
+    const groundMaterial = new BABYLON.StandardMaterial(
+      "groundMaterial",
+      this.scene
+    );
+    groundMaterial.diffuseColor = new BABYLON.Color3(0.85, 0.85, 0.85); // Light grey color
+    groundMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+
+    // Create a texture programmatically
+    const gridTexture = new BABYLON.DynamicTexture(
+      "gridTexture",
+      { width: 1024, height: 1024 },
+      this.scene
+    );
+    const ctx = gridTexture.getContext();
+
+    // Fill with a light grey color
+    ctx.fillStyle = "rgb(220, 220, 220)";
+    ctx.fillRect(0, 0, 1024, 1024);
+
+    // Add some texture/pattern to the ground
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgb(200, 200, 200)";
+
+    // Draw grid lines
+    for (let i = 0; i <= 1024; i += 32) {
+      // Vertical lines
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, 1024);
+      ctx.stroke();
+
+      // Horizontal lines
+      ctx.beginPath();
+      ctx.moveTo(0, i);
+      ctx.lineTo(1024, i);
+      ctx.stroke();
+    }
+
+    // Add some random subtle noise for texture
+    ctx.fillStyle = "rgba(180, 180, 180, 0.1)";
+    for (let i = 0; i < 500; i++) {
+      const x = Math.random() * 1024;
+      const y = Math.random() * 1024;
+      const size = 2 + Math.random() * 10;
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    gridTexture.update();
+    groundMaterial.diffuseTexture = gridTexture;
+
+    // Set texture scaling for the ground
+    if (groundMaterial.diffuseTexture) {
+      groundMaterial.diffuseTexture.uScale = 20;
+      groundMaterial.diffuseTexture.vScale = 20;
+    }
+
+    this.ground.material = groundMaterial;
+  }
+
+  private loadSounds(): void {
+    if (!BABYLON || !this.scene) return;
+
+    // Preload all sounds with correct paths and make sure they're ready to play
+    try {
+      console.log("Loading game sounds...");
+
+      // Create sound objects for each sound effect - ensure paths are correct for Windows
+      soundShoot = new BABYLON.Sound(
+        "shootSound",
+        "sounds/shoot.mp3", // Remove leading slash for Windows path compatibility
+        this.scene,
+        () => console.log("Shoot sound loaded successfully"),
+        {
+          loop: false,
+          autoplay: false,
+          volume: 0.7,
+        }
+      );
+
+      soundJump = new BABYLON.Sound(
+        "jumpSound",
+        "sounds/jump.mp3", // Remove leading slash for Windows path compatibility
+        this.scene,
+        () => console.log("Jump sound loaded successfully"),
+        {
+          loop: false,
+          autoplay: false,
+          volume: 0.8,
+        }
+      );
+
+      soundRun = new BABYLON.Sound(
+        "runSound",
+        "sounds/run.mp3", // Remove leading slash for Windows path compatibility
+        this.scene,
+        () => console.log("Run sound loaded successfully"),
+        {
+          loop: false,
+          autoplay: false,
+          volume: 0.5,
+        }
+      );
+
+      soundDie = new BABYLON.Sound(
+        "dieSound",
+        "sounds/die.mp3", // Remove leading slash for Windows path compatibility
+        this.scene,
+        () => console.log("Die sound loaded successfully"),
+        {
+          loop: false,
+          autoplay: false,
+          volume: 0.8,
+        }
+      );
+    } catch (error) {
+      console.error("Error loading sounds:", error);
+    }
+  }
+
+  private setupRunSound(): void {
+    if (!this.scene) return;
+
+    // Previous position to track movement
+    let prevPosition = { x: 0, z: 0 };
+
+    // Track player movement to trigger run sound
+    this.scene.registerBeforeRender(() => {
+      if (!this.camera || !this.localPlayer) return;
+
+      // Get current position
+      const currentPos = {
+        x: this.camera.position.x,
+        z: this.camera.position.z,
+      };
+
+      // Calculate movement since last frame
+      const deltaX = currentPos.x - prevPosition.x;
+      const deltaZ = currentPos.z - prevPosition.z;
+      const distanceMoved = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+
+      // Update previous position
+      prevPosition = { ...currentPos };
+
+      // Player is running if moving more than a threshold and not jumping/crouching
+      const isMovingNow =
+        distanceMoved > 0.05 &&
+        !this.localPlayer.isJumping &&
+        !this.localPlayer.isCrouching;
+
+      // Start run sound if just started moving
+      if (isMovingNow && !isRunning) {
+        isRunning = true;
+
+        // Play run sound at intervals while moving
+        if (!runSoundInterval) {
+          // Play sound immediately when starting to run
+          if (soundRun && !soundRun.isPlaying) {
+            soundRun.play();
+          }
+
+          // Then repeat at regular intervals
+          runSoundInterval = setInterval(() => {
+            if (soundRun && !soundRun.isPlaying && isRunning) {
+              soundRun.play();
+            }
+          }, 350); // Footstep interval
+        }
+      }
+      // Stop run sound if stopped moving
+      else if (!isMovingNow && isRunning) {
+        isRunning = false;
+
+        // Clear interval when stopped running
+        if (runSoundInterval) {
+          clearInterval(runSoundInterval);
+          runSoundInterval = null;
+        }
+      }
+    });
   }
 
   private createCrosshair(): void {
@@ -603,6 +880,22 @@ export class GameEngine {
   private shoot(): void {
     if (this.isRecoiling || !this.scene) return;
 
+    // Play shoot sound with better error handling
+    try {
+      if (soundShoot) {
+        // Check sound exists
+        if (!soundShoot.isPlaying) {
+          // Only play if not already playing
+          soundShoot.play();
+          console.log("Playing shoot sound");
+        }
+      } else {
+        console.warn("Shoot sound not loaded");
+      }
+    } catch (error) {
+      console.error("Error playing shoot sound:", error);
+    }
+
     // Play recoil animation
     this.isRecoiling = true;
     const weapon = this.getOrCreateWeapon();
@@ -631,6 +924,9 @@ export class GameEngine {
         this.scene
       );
       weaponMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+      // Fix material to prevent black artifact
+      weaponMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+      weaponMaterial.emissiveColor = new BABYLON.Color3(0.05, 0.05, 0.05);
       weapon.material = weaponMaterial;
       weapon.parent = this.camera;
       weapon.position = new BABYLON.Vector3(0.3, -0.3, 0.5);
@@ -685,7 +981,7 @@ export class GameEngine {
         this.camera.position.z
       ).add(direction.scale(1)); // Start 1 unit in front of camera
 
-      // Add a trail effect to make projectile more visible
+      // Add a trail effect to make projectile more visible - fix the black artifact
       const trail = new BABYLON.TrailMesh(
         "trail" + projectileId,
         projectile,
@@ -701,21 +997,23 @@ export class GameEngine {
       trailMaterial.emissiveColor = new BABYLON.Color3(1, 0.3, 0.3);
       trailMaterial.diffuseColor = new BABYLON.Color3(1, 0.05, 0.05);
       trailMaterial.alpha = 0.7;
+      trailMaterial.specularColor = new BABYLON.Color3(0, 0, 0); // Prevent black artifact
+      trailMaterial.backFaceCulling = false; // Fix rendering issues
       trail.material = trailMaterial;
 
       // Simple projectile motion
       const speed = this.settings.projectileSpeed;
       const velocity = direction.scale(speed);
 
-      // Calculate integer damage value
-      const damageValue = Math.floor(
+      // Calculate exact damage to ensure 3 shots kill (34 per shot)
+      const exactDamage = Math.ceil(
         this.settings.maxHealth / this.settings.shootsToKill
       );
 
       // Store the shooter ID for hit detection
       projectile.metadata = {
         shooterId: this.localPlayer.id,
-        damage: damageValue,
+        damage: exactDamage,
         velocity: velocity,
       };
 
@@ -779,7 +1077,9 @@ export class GameEngine {
       setTimeout(() => {
         try {
           this.scene.unregisterBeforeRender(updateFunction);
-          if (trail && !trail.isDisposed()) trail.dispose();
+          if (trail && !trail.isDisposed()) {
+            trail.dispose();
+          }
           if (projectile && !projectile.isDisposed()) projectile.dispose();
         } catch (error) {
           console.error("Error disposing projectile:", error);
@@ -837,17 +1137,20 @@ export class GameEngine {
     }
 
     try {
+      // Calculate exact damage to kill in 3 shots (34 damage per shot)
+      const exactDamage = Math.ceil(
+        this.settings.maxHealth / this.settings.shootsToKill
+      );
+
       // Ensure we have an integer for current health
       const currentHealth = Math.floor(
         playerToUpdate.metadata.health || this.settings.maxHealth
       );
 
       // Calculate new health as integer
-      const newHealth = Math.max(0, currentHealth - Math.floor(damage));
+      const newHealth = Math.max(0, currentHealth - exactDamage);
       console.log(
-        `Player ${playerId} hit: Health ${currentHealth} -> ${newHealth} (damage: ${Math.floor(
-          damage
-        )})`
+        `Player ${playerId} hit: Health ${currentHealth} -> ${newHealth} (damage: ${exactDamage})`
       );
 
       // Update the player's health locally
@@ -855,12 +1158,29 @@ export class GameEngine {
 
       // If player has no health left, it's a kill
       if (newHealth <= 0) {
+        // Play death sound for nearby players with better error handling
+        try {
+          if (soundDie) {
+            soundDie.play();
+            console.log("Playing death sound");
+          } else {
+            console.warn("Death sound not loaded");
+          }
+        } catch (error) {
+          console.error("Error playing death sound:", error);
+        }
+
         // Increment local player kills
         if (this.localPlayer) {
           this.localPlayer.kills += 1;
           console.log(
-            `Kill registered: ${this.localPlayer.id} killed ${playerId}`
+            `Kill registered: ${this.localPlayer.id} killed ${playerId}, total kills: ${this.localPlayer.kills}`
           );
+
+          // Notify UI about kills count change
+          if (this.onPlayerStatsUpdate) {
+            this.onPlayerStatsUpdate({ kills: this.localPlayer.kills });
+          }
         }
 
         // Show kill effect
@@ -870,8 +1190,9 @@ export class GameEngine {
         setTimeout(() => {
           if (playerToUpdate && !playerToUpdate.isDisposed()) {
             // Reset health to max (integer value)
-            playerToUpdate.metadata.health = Math.floor(
-              this.settings.maxHealth
+            playerToUpdate.metadata.health = this.settings.maxHealth;
+            console.log(
+              `Player ${playerId} respawned with health: ${this.settings.maxHealth}`
             );
 
             // Move the player to a random position
@@ -1330,6 +1651,10 @@ export class GameEngine {
     // Initialize map objects from server or create defaults
     this.initializeMapObjects();
 
+    // Create buildings and platforms (still needed for proper map functionality)
+    this.createBuildings();
+    this.createPlatforms();
+
     // Create neon lights but more of them and brighter
     this.createNeonLights();
 
@@ -1347,6 +1672,120 @@ export class GameEngine {
     ambientLight.intensity = 0.8; // Stronger intensity
     ambientLight.diffuse = new BABYLON.Color3(0.5, 0.5, 0.6);
     ambientLight.specular = new BABYLON.Color3(0.7, 0.7, 0.8);
+  }
+
+  private createBuildings(): void {
+    if (!BABYLON || !this.scene) return;
+
+    // Create multiple buildings with different heights and colors
+    for (let i = 0; i < 20; i++) {
+      const height = 5 + Math.random() * 15;
+      const width = 3 + Math.random() * 7;
+      const depth = 3 + Math.random() * 7;
+
+      const posX = (Math.random() - 0.5) * 160;
+      const posZ = (Math.random() - 0.5) * 160;
+
+      // Don't create buildings too close to the spawn area
+      if (Math.abs(posX) < 20 && Math.abs(posZ) < 20) continue;
+
+      const building = BABYLON.MeshBuilder.CreateBox(
+        `building-${i}`,
+        { width, height, depth },
+        this.scene
+      );
+
+      building.position.x = posX;
+      building.position.y = height / 2;
+      building.position.z = posZ;
+
+      const buildingMaterial = new BABYLON.StandardMaterial(
+        `buildingMaterial-${i}`,
+        this.scene
+      );
+
+      // Brighter cyberpunk style buildings
+      // Randomly select a color scheme
+      const colorSchemes = [
+        {
+          diffuse: new BABYLON.Color3(0.2, 0.4, 0.6),
+          emissive: new BABYLON.Color3(0.1, 0.2, 0.4),
+        }, // Blue
+        {
+          diffuse: new BABYLON.Color3(0.6, 0.2, 0.5),
+          emissive: new BABYLON.Color3(0.3, 0.1, 0.25),
+        }, // Purple
+        {
+          diffuse: new BABYLON.Color3(0.5, 0.6, 0.2),
+          emissive: new BABYLON.Color3(0.25, 0.3, 0.1),
+        }, // Green
+        {
+          diffuse: new BABYLON.Color3(0.6, 0.4, 0.2),
+          emissive: new BABYLON.Color3(0.3, 0.2, 0.1),
+        }, // Orange
+      ];
+
+      const colorScheme =
+        colorSchemes[Math.floor(Math.random() * colorSchemes.length)];
+      buildingMaterial.diffuseColor = colorScheme.diffuse;
+      buildingMaterial.emissiveColor = colorScheme.emissive;
+      buildingMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+
+      building.material = buildingMaterial;
+
+      // Add collision detection to buildings
+      building.checkCollisions = true;
+    }
+  }
+
+  private createPlatforms(): void {
+    if (!BABYLON || !this.scene) return;
+
+    // Create various platforms for jumping across the map
+    const platformPositions = [
+      { x: 10, y: 2, z: 10 },
+      { x: -15, y: 4, z: 15 },
+      { x: 20, y: 6, z: -10 },
+      { x: -25, y: 8, z: -20 },
+      { x: 30, y: 10, z: 25 },
+      { x: 15, y: 5, z: 30 },
+      { x: -30, y: 7, z: -15 },
+      { x: 0, y: 12, z: 40 },
+      { x: 0, y: 8, z: -40 },
+      { x: -40, y: 6, z: 0 },
+      { x: 40, y: 4, z: 0 },
+    ];
+
+    platformPositions.forEach((pos, index) => {
+      const platform = BABYLON.MeshBuilder.CreateBox(
+        `platform-${index}`,
+        { width: 5, height: 0.5, depth: 5 },
+        this.scene
+      );
+
+      platform.position = new BABYLON.Vector3(pos.x, pos.y, pos.z);
+      platform.checkCollisions = true;
+
+      const platformMaterial = new BABYLON.StandardMaterial(
+        `platformMaterial-${index}`,
+        this.scene
+      );
+
+      // Neon-colored platforms
+      const platformColors = [
+        new BABYLON.Color3(1, 0.2, 0.7), // Pink
+        new BABYLON.Color3(0.2, 0.8, 1), // Cyan
+        new BABYLON.Color3(0.8, 0.2, 1), // Purple
+        new BABYLON.Color3(1, 0.8, 0.2), // Yellow
+        new BABYLON.Color3(0.2, 1, 0.5), // Green
+      ];
+
+      const colorIndex = index % platformColors.length;
+      platformMaterial.diffuseColor = platformColors[colorIndex];
+      platformMaterial.emissiveColor = platformColors[colorIndex].scale(0.5);
+      platformMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
+      platform.material = platformMaterial;
+    });
   }
 
   /**
@@ -1521,183 +1960,6 @@ export class GameEngine {
     return objects;
   }
 
-  private createGround(): void {
-    if (!BABYLON || !this.scene) return;
-
-    // Create a larger ground with a more interesting material
-    this.ground = BABYLON.MeshBuilder.CreateGround(
-      "ground",
-      { width: 200, height: 200 },
-      this.scene
-    );
-    this.ground.checkCollisions = true;
-
-    // Raise the ground slightly to prevent z-fighting
-    this.ground.position.y = 0.01;
-
-    const groundMaterial = new BABYLON.StandardMaterial(
-      "groundMaterial",
-      this.scene
-    );
-    groundMaterial.diffuseColor = new BABYLON.Color3(0.6, 0.8, 0.9); // Much lighter blue
-    groundMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.3);
-    groundMaterial.emissiveColor = new BABYLON.Color3(0.1, 0.1, 0.2); // Slightly brighter emissive
-
-    // Create a grid texture programmatically
-    const gridTexture = new BABYLON.DynamicTexture(
-      "gridTexture",
-      { width: 1024, height: 1024 },
-      this.scene
-    );
-    const ctx = gridTexture.getContext();
-
-    // Fill with a light color
-    ctx.fillStyle = "rgb(150, 200, 255)"; // Light blue background
-    ctx.fillRect(0, 0, 1024, 1024);
-
-    // Draw grid lines less frequently
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgb(100, 150, 255)"; // Darker blue lines
-
-    // Draw fewer grid lines to reduce blinking
-    ctx.beginPath();
-    for (let i = 0; i <= 1024; i += 128) {
-      // Vertical lines
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, 1024);
-
-      // Horizontal lines
-      ctx.moveTo(0, i);
-      ctx.lineTo(1024, i);
-    }
-    ctx.stroke();
-
-    gridTexture.update();
-    groundMaterial.diffuseTexture = gridTexture;
-
-    // Set texture scaling for the ground
-    if (groundMaterial.diffuseTexture) {
-      groundMaterial.diffuseTexture.uScale = 20;
-      groundMaterial.diffuseTexture.vScale = 20;
-    }
-
-    this.ground.material = groundMaterial;
-  }
-
-  private createBuildings(): void {
-    if (!BABYLON || !this.scene) return;
-
-    // Create multiple buildings with different heights and colors
-    for (let i = 0; i < 20; i++) {
-      const height = 5 + Math.random() * 15;
-      const width = 3 + Math.random() * 7;
-      const depth = 3 + Math.random() * 7;
-
-      const posX = (Math.random() - 0.5) * 160;
-      const posZ = (Math.random() - 0.5) * 160;
-
-      // Don't create buildings too close to the spawn area
-      if (Math.abs(posX) < 20 && Math.abs(posZ) < 20) continue;
-
-      const building = BABYLON.MeshBuilder.CreateBox(
-        `building-${i}`,
-        { width, height, depth },
-        this.scene
-      );
-
-      building.position.x = posX;
-      building.position.y = height / 2;
-      building.position.z = posZ;
-
-      const buildingMaterial = new BABYLON.StandardMaterial(
-        `buildingMaterial-${i}`,
-        this.scene
-      );
-
-      // Brighter cyberpunk style buildings
-      // Randomly select a color scheme
-      const colorSchemes = [
-        {
-          diffuse: new BABYLON.Color3(0.2, 0.4, 0.6),
-          emissive: new BABYLON.Color3(0.1, 0.2, 0.4),
-        }, // Blue
-        {
-          diffuse: new BABYLON.Color3(0.6, 0.2, 0.5),
-          emissive: new BABYLON.Color3(0.3, 0.1, 0.25),
-        }, // Purple
-        {
-          diffuse: new BABYLON.Color3(0.5, 0.6, 0.2),
-          emissive: new BABYLON.Color3(0.25, 0.3, 0.1),
-        }, // Green
-        {
-          diffuse: new BABYLON.Color3(0.6, 0.4, 0.2),
-          emissive: new BABYLON.Color3(0.3, 0.2, 0.1),
-        }, // Orange
-      ];
-
-      const colorScheme =
-        colorSchemes[Math.floor(Math.random() * colorSchemes.length)];
-      buildingMaterial.diffuseColor = colorScheme.diffuse;
-      buildingMaterial.emissiveColor = colorScheme.emissive;
-      buildingMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
-
-      building.material = buildingMaterial;
-
-      // Add collision detection to buildings
-      building.checkCollisions = true;
-    }
-  }
-
-  private createPlatforms(): void {
-    if (!BABYLON || !this.scene) return;
-
-    // Create various platforms for jumping across the map
-    const platformPositions = [
-      { x: 10, y: 2, z: 10 },
-      { x: -15, y: 4, z: 15 },
-      { x: 20, y: 6, z: -10 },
-      { x: -25, y: 8, z: -20 },
-      { x: 30, y: 10, z: 25 },
-      { x: 15, y: 5, z: 30 },
-      { x: -30, y: 7, z: -15 },
-      { x: 0, y: 12, z: 40 },
-      { x: 0, y: 8, z: -40 },
-      { x: -40, y: 6, z: 0 },
-      { x: 40, y: 4, z: 0 },
-    ];
-
-    platformPositions.forEach((pos, index) => {
-      const platform = BABYLON.MeshBuilder.CreateBox(
-        `platform-${index}`,
-        { width: 5, height: 0.5, depth: 5 },
-        this.scene
-      );
-
-      platform.position = new BABYLON.Vector3(pos.x, pos.y, pos.z);
-      platform.checkCollisions = true;
-
-      const platformMaterial = new BABYLON.StandardMaterial(
-        `platformMaterial-${index}`,
-        this.scene
-      );
-
-      // Neon-colored platforms
-      const platformColors = [
-        new BABYLON.Color3(1, 0.2, 0.7), // Pink
-        new BABYLON.Color3(0.2, 0.8, 1), // Cyan
-        new BABYLON.Color3(0.8, 0.2, 1), // Purple
-        new BABYLON.Color3(1, 0.8, 0.2), // Yellow
-        new BABYLON.Color3(0.2, 1, 0.5), // Green
-      ];
-
-      const colorIndex = index % platformColors.length;
-      platformMaterial.diffuseColor = platformColors[colorIndex];
-      platformMaterial.emissiveColor = platformColors[colorIndex].scale(0.5);
-      platformMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
-      platform.material = platformMaterial;
-    });
-  }
-
   private createNeonLights(): void {
     if (!BABYLON || !this.scene) return;
 
@@ -1767,6 +2029,18 @@ export class GameEngine {
     if (this.engine) {
       console.log("Disposing game engine");
 
+      // Clean up sound resources
+      if (soundShoot) soundShoot.dispose();
+      if (soundJump) soundJump.dispose();
+      if (soundRun) soundRun.dispose();
+      if (soundDie) soundDie.dispose();
+
+      // Clear any running intervals
+      if (runSoundInterval) {
+        clearInterval(runSoundInterval);
+        runSoundInterval = null;
+      }
+
       // Remove crosshair if it exists
       if (this.crosshair && this.crosshair.parentNode) {
         document.body.removeChild(this.crosshair);
@@ -1782,6 +2056,22 @@ export class GameEngine {
 
     // Only jump if not already jumping
     if (this.localPlayer.isJumping) return;
+
+    // Play jump sound with additional error handling
+    try {
+      if (soundJump) {
+        // Check sound exists
+        if (!soundJump.isPlaying) {
+          // Only play if not already playing
+          soundJump.play();
+          console.log("Playing jump sound");
+        }
+      } else {
+        console.warn("Jump sound not loaded");
+      }
+    } catch (error) {
+      console.error("Error playing jump sound:", error);
+    }
 
     console.log("Player initiating jump");
 
@@ -2115,15 +2405,15 @@ export class GameEngine {
     const speed = this.settings.projectileSpeed;
     const velocity = direction.normalize().scale(speed);
 
-    // Calculate integer damage value
-    const damageValue = Math.floor(
+    // Calculate exact damage to kill in 3 shots
+    const exactDamage = Math.ceil(
       this.settings.maxHealth / this.settings.shootsToKill
     );
 
     // Store metadata
     projectile.metadata = {
       shooterId: projectileData.playerId,
-      damage: damageValue,
+      damage: exactDamage,
       velocity: velocity,
     };
 
@@ -2153,20 +2443,49 @@ export class GameEngine {
 
             // Reduce local player health (ensure integer value)
             if (this.localPlayer) {
+              // Calculate exact damage
+              const exactDamage = Math.ceil(
+                this.settings.maxHealth / this.settings.shootsToKill
+              );
               const newHealth = Math.max(
                 0,
-                this.localPlayer.health - projectile.metadata.damage
+                this.localPlayer.health - exactDamage
               );
               this.localPlayer.health = Math.floor(newHealth);
 
+              // Notify the callback about the health change
+              if (this.onLocalPlayerHitCallback) {
+                this.onLocalPlayerHitCallback(this.localPlayer.health);
+              }
+
               // If player died, increment the shooter's kill count
               if (this.localPlayer.health <= 0) {
+                // Play death sound
+                try {
+                  if (soundDie) {
+                    soundDie.play();
+                    console.log("Playing death sound for local player");
+                  } else {
+                    console.warn("Death sound not loaded");
+                  }
+                } catch (error) {
+                  console.error("Error playing death sound:", error);
+                }
+
                 // Reset health and teleport
                 this.localPlayer.health = this.settings.maxHealth;
                 this.respawnLocalPlayer();
 
                 // Increment deaths count
                 this.localPlayer.deaths += 1;
+                console.log(
+                  `Local player died, total deaths: ${this.localPlayer.deaths}`
+                );
+
+                // Update deaths count
+                if (this.onPlayerStatsUpdate) {
+                  this.onPlayerStatsUpdate({ deaths: this.localPlayer.deaths });
+                }
 
                 // Update server with new health and deaths count
                 this.updateLocalPlayerStats();
@@ -2182,7 +2501,7 @@ export class GameEngine {
           }
         }
 
-        // Check if projectile is too far away
+        // Check if projectile is too far away and dispose if needed
         if (
           !projectile.isDisposed() &&
           BABYLON.Vector3.Distance(
@@ -2230,6 +2549,9 @@ export class GameEngine {
   private respawnLocalPlayer(): void {
     if (!this.localPlayer || !this.camera) return;
 
+    // Reset health to max
+    this.localPlayer.health = this.settings.maxHealth;
+
     // Get a random spawn position
     const spawnPos = this.getRandomSpawnPosition();
 
@@ -2243,6 +2565,14 @@ export class GameEngine {
     // Reset jumping and velocity
     this.localPlayer.isJumping = false;
     this.localPlayer.velocity = { x: 0, y: 0, z: 0 };
+
+    // Ensure UI gets updated with new health value
+    if (this.onLocalPlayerHitCallback) {
+      this.onLocalPlayerHitCallback(this.localPlayer.health);
+    }
+
+    // Update server with new player state
+    this.sendPlayerUpdate();
   }
 
   // Update local player stats to server after being hit
@@ -2255,5 +2585,10 @@ export class GameEngine {
     } catch (err) {
       console.error("Failed to update local player stats:", err);
     }
+  }
+
+  // Add a method to get the current local player
+  public getLocalPlayer(): Player | null {
+    return this.localPlayer;
   }
 }

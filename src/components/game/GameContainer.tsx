@@ -42,6 +42,10 @@ export function GameContainer() {
   const [localPlayer, setLocalPlayer] = useState<Player | null>(null);
   const supabaseRef = useRef<any>(null);
   const [mapObjects, setMapObjects] = useState<MapObject[]>([]);
+  // Add state for player stats UI
+  const [playerHealth, setPlayerHealth] = useState(100);
+  const [playerKills, setPlayerKills] = useState(0);
+  const [playerDeaths, setPlayerDeaths] = useState(0);
 
   // Add a debug message
   const addDebugMessage = (message: string) => {
@@ -483,6 +487,57 @@ export function GameContainer() {
     };
   }, [localPlayer]);
 
+  // Add a new effect to update player stats for UI
+  useEffect(() => {
+    if (!isPlaying || !localPlayer) return;
+
+    // Initial update of UI stats from local player state
+    setPlayerHealth(localPlayer.health);
+    setPlayerKills(localPlayer.kills);
+    setPlayerDeaths(localPlayer.deaths);
+
+    // Setup an interval to keep checking for health/stats changes
+    const statsInterval = setInterval(() => {
+      if (engineRef.current && localPlayer) {
+        // Check if local player state needs updating by querying the engine's internal state
+        const currentPlayer = engineRef.current.getLocalPlayer();
+
+        if (currentPlayer) {
+          // Always update UI values to match the actual player state in the engine
+          if (currentPlayer.health !== playerHealth) {
+            console.log(
+              `Health UI update: ${playerHealth} -> ${currentPlayer.health}`
+            );
+            setPlayerHealth(currentPlayer.health);
+          }
+
+          if (currentPlayer.kills !== playerKills) {
+            console.log(
+              `Kills UI update: ${playerKills} -> ${currentPlayer.kills}`
+            );
+            setPlayerKills(currentPlayer.kills);
+          }
+
+          if (currentPlayer.deaths !== playerDeaths) {
+            console.log(
+              `Deaths UI update: ${playerDeaths} -> ${currentPlayer.deaths}`
+            );
+            setPlayerDeaths(currentPlayer.deaths);
+          }
+        }
+      }
+    }, 100); // Check more frequently (every 100ms instead of 250ms)
+
+    return () => {
+      clearInterval(statsInterval);
+
+      // Reset stats when game stops
+      setPlayerHealth(100);
+      setPlayerKills(0);
+      setPlayerDeaths(0);
+    };
+  }, [isPlaying, localPlayer]);
+
   const startGame = async () => {
     if (!canvasRef.current) {
       setError("Canvas not available");
@@ -493,6 +548,9 @@ export function GameContainer() {
     setError(null);
     setIsLoading(true);
     setDebug([]);
+    setPlayerHealth(100);
+    setPlayerKills(0);
+    setPlayerDeaths(0);
 
     try {
       addDebugMessage("Starting game initialization");
@@ -559,6 +617,42 @@ export function GameContainer() {
       // Set the local player in the game engine
       engine.setLocalPlayer(newPlayer);
 
+      // Register health update callback for direct UI updates
+      engine.onLocalPlayerHit((newHealth) => {
+        console.log("Local player health update:", newHealth);
+        setPlayerHealth(newHealth);
+
+        // Update the local player state with the new health value
+        setLocalPlayer((current) => {
+          if (!current) return current;
+          return { ...current, health: newHealth };
+        });
+      });
+
+      // Add a new callback to handle kill and death count updates
+      engine.onPlayerStatsUpdate = (stats) => {
+        console.log("Player stats update:", stats);
+
+        // Update kills and deaths counters in the UI
+        if (stats.kills !== undefined) {
+          setPlayerKills(stats.kills);
+        }
+
+        if (stats.deaths !== undefined) {
+          setPlayerDeaths(stats.deaths);
+        }
+
+        // Update the local player state to stay in sync
+        setLocalPlayer((current) => {
+          if (!current) return current;
+          return {
+            ...current,
+            kills: stats.kills !== undefined ? stats.kills : current.kills,
+            deaths: stats.deaths !== undefined ? stats.deaths : current.deaths,
+          };
+        });
+      };
+
       // Register initial player position with Supabase
       addDebugMessage("Registering player with server");
       try {
@@ -605,6 +699,11 @@ export function GameContainer() {
     setDebug([]);
     setLocalPlayer(null); // Clear the local player when stopping the game
     setOtherPlayers([]); // Clear other players
+
+    // Reset player stats
+    setPlayerHealth(100);
+    setPlayerKills(0);
+    setPlayerDeaths(0);
   };
 
   const generateDummyPlayers = (
@@ -668,6 +767,13 @@ export function GameContainer() {
     }
   };
 
+  // Helper function to get health color based on current health
+  const getHealthColor = (health: number) => {
+    if (health > 70) return "bg-green-500";
+    if (health > 30) return "bg-yellow-500";
+    return "bg-red-500";
+  };
+
   return (
     <div className="flex flex-col items-center justify-center w-full h-full bg-black">
       {/* Always render the canvas, but hidden when not playing */}
@@ -682,6 +788,42 @@ export function GameContainer() {
 
         {isPlaying && (
           <>
+            {/* Game stats UI - positioned in top left */}
+            <div className="absolute top-4 left-4 flex flex-col space-y-2 p-3 bg-black/70 backdrop-blur-sm rounded-lg border border-gray-700 text-white font-mono max-w-48 z-10">
+              {/* Player health bar */}
+              <div className="flex flex-col">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-semibold">HEALTH</span>
+                  <span className="text-xs">{playerHealth}/100</span>
+                </div>
+                <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full ${getHealthColor(
+                      playerHealth
+                    )} transition-all duration-300`}
+                    style={{ width: `${playerHealth}%` }}
+                  ></div>
+                </div>
+              </div>
+
+              {/* Score stats */}
+              <div className="flex justify-between items-center pt-1 border-t border-gray-700">
+                <div className="flex flex-col items-center">
+                  <span className="text-xs text-gray-400">KILLS</span>
+                  <span className="text-lg font-bold text-green-400">
+                    {playerKills}
+                  </span>
+                </div>
+                <div className="text-xl font-bold text-gray-500 mx-2">:</div>
+                <div className="flex flex-col items-center">
+                  <span className="text-xs text-gray-400">DEATHS</span>
+                  <span className="text-lg font-bold text-red-400">
+                    {playerDeaths}
+                  </span>
+                </div>
+              </div>
+            </div>
+
             <div className="absolute top-4 right-4">
               <Button onClick={stopGame} variant="destructive">
                 Exit Game
