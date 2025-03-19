@@ -11,6 +11,59 @@ const defaultConfig: SupabaseConfig = {
 // Create a singleton Supabase client
 let supabaseClient: ReturnType<typeof createBrowserClient> | null = null;
 
+// Add type for Player data structure used in Supabase
+export type PlayerData = {
+  id: string;
+  name: string;
+  position_x: number;
+  position_y: number;
+  position_z: number;
+  rotation_x: number;
+  rotation_y: number;
+  rotation_z: number;
+  velocity_x: number;
+  velocity_y: number;
+  velocity_z: number;
+  is_jumping: boolean;
+  is_crouching: boolean;
+  player_class?: string;
+  health: number;
+  kills: number;
+  deaths: number;
+  is_active?: boolean;
+  last_updated: string;
+};
+
+// Add type for MapObject data structure used in Supabase
+export type MapObjectData = {
+  id: string;
+  type: "platform" | "building" | "light";
+  position_x: number;
+  position_y: number;
+  position_z: number;
+  rotation_x: number;
+  rotation_y: number;
+  rotation_z: number;
+  scaling_x: number;
+  scaling_y: number;
+  scaling_z: number;
+  color: string;
+  last_updated: string;
+};
+
+// Add type for Projectile data structure used in Supabase
+export type ProjectileData = {
+  id: string;
+  player_id: string;
+  position_x: number;
+  position_y: number;
+  position_z: number;
+  direction_x: number;
+  direction_y: number;
+  direction_z: number;
+  created_at: string;
+};
+
 export function getSupabaseClient(config: Partial<SupabaseConfig> = {}) {
   // Only create the client on the client-side
   if (typeof window === "undefined") {
@@ -42,7 +95,20 @@ export async function joinGameChannel(
   return supabase.channel(channel);
 }
 
-export async function sendPlayerUpdate(player: any) {
+export async function sendPlayerUpdate(player: {
+  id: string;
+  name: string;
+  position: { x: number; y: number; z: number };
+  rotation: { x: number; y: number; z: number };
+  velocity: { x: number; y: number; z: number };
+  isJumping: boolean;
+  isCrouching: boolean;
+  playerClass?: string;
+  health: number;
+  kills: number;
+  deaths: number;
+  lastUpdated: number;
+}) {
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
@@ -68,7 +134,17 @@ export async function sendPlayerUpdate(player: any) {
   });
 }
 
-export async function sendProjectile(projectile: any) {
+export async function sendProjectile(projectile: {
+  id: string;
+  player_id: string;
+  position_x: number;
+  position_y: number;
+  position_z: number;
+  direction_x: number;
+  direction_y: number;
+  direction_z: number;
+  created_at?: string;
+}) {
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
@@ -113,7 +189,13 @@ export async function getActivePlayers() {
   return supabase.from("players").select("*").gt("last_updated", oneMinuteAgo);
 }
 
-export async function listenForPlayerUpdates(callback: (payload: any) => void) {
+export async function listenForPlayerUpdates(
+  callback: (payload: {
+    eventType: string;
+    new: PlayerData;
+    old?: Partial<PlayerData>;
+  }) => void
+) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
@@ -127,7 +209,13 @@ export async function listenForPlayerUpdates(callback: (payload: any) => void) {
     .subscribe();
 }
 
-export async function listenForProjectiles(callback: (payload: any) => void) {
+export async function listenForProjectiles(
+  callback: (payload: {
+    eventType: string;
+    new: ProjectileData;
+    old?: Partial<ProjectileData>;
+  }) => void
+) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
@@ -141,7 +229,15 @@ export async function listenForProjectiles(callback: (payload: any) => void) {
     .subscribe();
 }
 
-export async function sendMapObject(mapObject: any) {
+export async function sendMapObject(mapObject: {
+  id: string;
+  type: "platform" | "building" | "light";
+  position: { x: number; y: number; z: number };
+  rotation: { x: number; y: number; z: number };
+  scaling: { x: number; y: number; z: number };
+  color: string;
+  lastUpdated: number;
+}) {
   const supabase = getSupabaseClient();
   if (!supabase) return;
 
@@ -170,7 +266,11 @@ export async function getMapObjects() {
 }
 
 export async function listenForMapObjectUpdates(
-  callback: (payload: any) => void
+  callback: (payload: {
+    eventType: string;
+    new: MapObjectData;
+    old?: Partial<MapObjectData>;
+  }) => void
 ) {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
@@ -321,7 +421,7 @@ export async function deletePlayer(playerId: string) {
 
   try {
     // First check if the player exists
-    const { data: existingPlayer, error: checkError } = await supabase
+    const { error: checkError } = await supabase
       .from("players")
       .select("id")
       .eq("id", playerId)
