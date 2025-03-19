@@ -1,45 +1,21 @@
-export type TechCompany =
-  | "Google"
-  | "Facebook"
-  | "Twitter"
-  | "Microsoft"
-  | "Apple"
-  | "Amazon"
-  | "Netflix"
-  | "Tesla"
-  | "Uber"
-  | "Airbnb";
-
-export type PlayerClass =
-  | "Scout"
-  | "Soldier"
-  | "Pyro"
-  | "Demoman"
-  | "Heavy"
-  | "Engineer"
-  | "Medic"
-  | "Sniper"
-  | "Spy";
+export interface Vector3 {
+  x: number;
+  y: number;
+  z: number;
+}
 
 export interface Player {
   id: string;
-  name: TechCompany;
+  name: string;
   health: number;
   position: Vector3;
   rotation: Vector3;
   velocity: Vector3;
   isJumping: boolean;
   isCrouching: boolean;
-  playerClass: PlayerClass;
   kills: number;
   deaths: number;
   lastUpdated: number;
-}
-
-export interface Vector3 {
-  x: number;
-  y: number;
-  z: number;
 }
 
 export interface GameState {

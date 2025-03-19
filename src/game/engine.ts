@@ -1442,30 +1442,8 @@ export class GameEngine {
   private getPlayerColor(name: string): any {
     if (!BABYLON) return {};
 
-    switch (name) {
-      case "Google":
-        return new BABYLON.Color3(0.3, 0.6, 1);
-      case "Facebook":
-        return new BABYLON.Color3(0.2, 0.4, 0.8);
-      case "Twitter":
-        return new BABYLON.Color3(0.4, 0.7, 1);
-      case "Microsoft":
-        return new BABYLON.Color3(0.7, 0.2, 0.7);
-      case "Apple":
-        return new BABYLON.Color3(0.8, 0.8, 0.8);
-      case "Amazon":
-        return new BABYLON.Color3(1, 0.6, 0.2);
-      case "Netflix":
-        return new BABYLON.Color3(0.8, 0.1, 0.1);
-      case "Tesla":
-        return new BABYLON.Color3(0.9, 0.1, 0.3);
-      case "Uber":
-        return new BABYLON.Color3(0.1, 0.1, 0.1);
-      case "Airbnb":
-        return new BABYLON.Color3(1, 0.3, 0.4);
-      default:
-        return new BABYLON.Color3(0.5, 0.5, 0.5);
-    }
+    // Return toxic green color for all players
+    return new BABYLON.Color3(0.4, 1.0, 0.0);
   }
 
   public removePlayer(playerId: string): void {
