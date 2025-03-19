@@ -6,7 +6,9 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "init-map": "node scripts/initialize-map.js",
+    "postbuild": "npm run init-map"
   },
   "dependencies": {
     "@babylonjs/gui": "^7.53.3",
@@ -49,6 +51,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "15.2.3",
+    "node-fetch": "^2.7.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

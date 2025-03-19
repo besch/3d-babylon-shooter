@@ -1,4 +1,42 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 3D Babylon Shooter
+
+A 3D multiplayer first-person shooter built with Next.js, Babylon.js, and Supabase.
+
+## Map Objects Initialization
+
+The game now uses persistent map objects that are stored in the Supabase database. These objects are initialized once and persist even when there are no active players in the game. This makes the game world stable and consistent across sessions.
+
+Map objects are initialized in one of three ways:
+
+1. **Automatically on first load**: When anyone visits the game, the `MapInitializer` component will check if map objects exist and create them if needed.
+
+2. **During deployment**: The build process includes a `postbuild` script that initializes map objects automatically.
+
+3. **Manually**: You can manually trigger map initialization by running:
+   ```
+   npm run init-map [baseUrl]
+   ```
+   Where `baseUrl` is optional and defaults to `http://localhost:3000`. For production, you would use:
+   ```
+   npm run init-map https://your-deployed-site.vercel.app
+   ```
+
+## Development
+
+```bash
+npm run dev
+```
+
+## Deployment
+
+Deploy to Vercel as a Next.js application. The map objects will be automatically initialized during the build process.
+
+## Local Setup
+
+1. Clone the repository
+2. Install dependencies: `npm install`
+3. Set up environment variables for Supabase in `.env.local`
+4. Run the development server: `npm run dev`
 
 ## Getting Started
 

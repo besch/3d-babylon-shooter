@@ -5,16 +5,15 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Tech Wars: FPS - Cyberpunk First Person Shooter",
-  description:
-    "A first-person shooter game set in a cyberpunk world where you play as tech companies",
+  title: "3D Babylon Shooter",
+  description: "A multiplayer 3D shooter game made with Babylon.js",
 };
 
 export default function RootLayout({
   children,
-}: Readonly<{
+}: {
   children: React.ReactNode;
-}>) {
+}) {
   return (
     <html lang="en">
       <body className={inter.className}>{children}</body>

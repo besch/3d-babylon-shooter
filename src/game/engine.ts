@@ -1663,17 +1663,15 @@ export class GameEngine {
   }
 
   /**
-   * Initialize map objects - either load from server or create defaults
+   * Initialize map objects - load from server only
    */
   private async initializeMapObjects() {
     try {
-      // Import the sendMapObject and getMapObjects functions dynamically
+      // Import the getMapObjects function dynamically
       // to avoid circular dependencies
-      const { getMapObjects, sendMapObject } = await import(
-        "@/lib/supabase/client"
-      );
+      const { getMapObjects } = await import("@/lib/supabase/client");
 
-      // Try to get existing map objects from the server
+      // Get existing map objects from the server
       const response = await getMapObjects();
 
       if (response.data && response.data.length > 0) {
@@ -1706,20 +1704,16 @@ export class GameEngine {
           this.updateMapObject(mapObject);
         });
       } else {
-        console.log("No map objects found, creating defaults");
+        console.log("No map objects found on server");
 
-        // Create default map objects
-        const defaultObjects = this.createDefaultMapObjects();
+        // Instead of creating defaults, notify user to run initialization
+        console.warn(
+          "Please ensure map objects are initialized by calling the init API first"
+        );
 
-        // Save them to the server
-        for (const obj of defaultObjects) {
-          try {
-            await sendMapObject(obj);
-            this.updateMapObject(obj);
-          } catch (err) {
-            console.error("Failed to save map object:", err);
-          }
-        }
+        // Fall back to creating some local-only objects for this session
+        this.createBuildings();
+        this.createPlatforms();
       }
     } catch (err) {
       console.error("Error initializing map objects:", err);
@@ -1728,110 +1722,6 @@ export class GameEngine {
       this.createBuildings();
       this.createPlatforms();
     }
-  }
-
-  /**
-   * Create default map objects when none exist on the server
-   */
-  private createDefaultMapObjects() {
-    const objects = [];
-    const { v4: uuidv4 } = require("uuid");
-
-    // Create platform objects
-    const platformPositions = [
-      { x: 10, y: 2, z: 10 },
-      { x: -15, y: 4, z: 15 },
-      { x: 20, y: 6, z: -10 },
-      { x: -25, y: 8, z: -20 },
-      { x: 30, y: 10, z: 25 },
-      { x: 15, y: 5, z: 30 },
-      { x: -30, y: 7, z: -15 },
-      { x: 0, y: 12, z: 40 },
-      { x: 0, y: 8, z: -40 },
-      { x: -40, y: 6, z: 0 },
-      { x: 40, y: 4, z: 0 },
-    ];
-
-    // Platform colors
-    const platformColors = [
-      "#ff3366", // Pink
-      "#33ccff", // Cyan
-      "#cc33ff", // Purple
-      "#ffcc33", // Yellow
-      "#33ff99", // Green
-    ];
-
-    // Create platforms
-    platformPositions.forEach((pos, index) => {
-      objects.push({
-        id: uuidv4(),
-        type: "platform" as "platform",
-        position: { x: pos.x, y: pos.y, z: pos.z },
-        rotation: { x: 0, y: 0, z: 0 },
-        scaling: { x: 1, y: 1, z: 1 },
-        color: platformColors[index % platformColors.length],
-        lastUpdated: Date.now(),
-      });
-    });
-
-    // Create building objects
-    for (let i = 0; i < 20; i++) {
-      const height = 5 + Math.random() * 15;
-      const width = 3 + Math.random() * 7;
-      const depth = 3 + Math.random() * 7;
-
-      const posX = (Math.random() - 0.5) * 160;
-      const posZ = (Math.random() - 0.5) * 160;
-
-      // Don't create buildings too close to the spawn area
-      if (Math.abs(posX) < 20 && Math.abs(posZ) < 20) continue;
-
-      // Building colors
-      const buildingColors = [
-        "#336699", // Blue
-        "#993366", // Purple
-        "#669933", // Green
-        "#996633", // Orange
-      ];
-
-      objects.push({
-        id: uuidv4(),
-        type: "building" as "building",
-        position: { x: posX, y: height / 2, z: posZ },
-        rotation: { x: 0, y: Math.random() * Math.PI * 2, z: 0 },
-        scaling: { x: width / 4, y: height / 10, z: depth / 4 },
-        color:
-          buildingColors[Math.floor(Math.random() * buildingColors.length)],
-        lastUpdated: Date.now(),
-      });
-    }
-
-    // Create light objects
-    const colors = [
-      "#ff3366", // Pink
-      "#33ccff", // Cyan
-      "#cc33ff", // Purple
-      "#ffcc33", // Yellow
-      "#33ff99", // Green
-    ];
-
-    for (let i = 0; i < 50; i++) {
-      const posX = (Math.random() - 0.5) * 160;
-      const posY = 0.5 + Math.random() * 20;
-      const posZ = (Math.random() - 0.5) * 160;
-
-      objects.push({
-        id: uuidv4(),
-        type: "light" as "light",
-        position: { x: posX, y: posY, z: posZ },
-        rotation: { x: 0, y: 0, z: 0 },
-        scaling: { x: 1, y: 1, z: 1 },
-        color: colors[Math.floor(Math.random() * colors.length)],
-        lastUpdated: Date.now(),
-      });
-    }
-
-    return objects;
   }
 
   private createNeonLights(): void {
