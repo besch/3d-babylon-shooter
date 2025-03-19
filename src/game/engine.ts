@@ -21,6 +21,71 @@ let soundDie: any = null;
 let isRunning: boolean = false;
 let runSoundInterval: any = null;
 
+// Add a fallback sound system using standard Web Audio API
+let audioContext: AudioContext | null = null;
+let audioBuffers: Record<string, AudioBuffer> = {};
+let useFallbackAudio = true; // Force fallback audio by default since we know it works
+let debugSound = true; // Set to true for additional sound debugging
+
+// Function to play sounds with the fallback system
+function playFallbackSound(soundName: string): boolean {
+  if (!audioContext) {
+    console.error(`Cannot play sound ${soundName}: Audio context is null`);
+    return false;
+  }
+
+  if (!audioBuffers[soundName]) {
+    console.error(`Cannot play sound ${soundName}: Sound not loaded in buffer`);
+    return false;
+  }
+
+  try {
+    if (debugSound) console.log(`Playing fallback sound: ${soundName}`);
+
+    // Check audio context state
+    if (audioContext.state !== "running") {
+      console.warn(
+        `Audio context not running (state: ${audioContext.state}), attempting to resume...`
+      );
+      audioContext
+        .resume()
+        .catch((err) => console.error("Failed to resume audio context:", err));
+    }
+
+    const source = audioContext.createBufferSource();
+    source.buffer = audioBuffers[soundName];
+    source.connect(audioContext.destination);
+    source.start(0);
+
+    if (debugSound) console.log(`Sound ${soundName} started playing`);
+    return true;
+  } catch (error: any) {
+    console.error(`Error playing fallback sound ${soundName}:`, error);
+    return false;
+  }
+}
+
+// Function to load audio buffer
+async function loadAudioBuffer(url: string, name: string): Promise<void> {
+  if (!audioContext) {
+    console.error("No audio context available for loading", name);
+    return Promise.resolve(); // Return resolved promise to avoid errors in Promise.all
+  }
+
+  try {
+    if (debugSound) console.log(`Loading fallback sound: ${name} from ${url}`);
+    const response = await fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    audioBuffers[name] = audioBuffer;
+    console.log(`Fallback sound loaded: ${name}`);
+    return Promise.resolve();
+  } catch (error: any) {
+    console.error(`Error loading fallback sound ${name}:`, error);
+    return Promise.reject(error);
+  }
+}
+
 // Add a debounce implementation to prevent too many API calls
 function debounce<T extends (...args: any[]) => any>(
   func: T,
@@ -465,416 +530,115 @@ export class GameEngine {
     try {
       console.log("Loading game sounds...");
 
-      // Create sound objects for each sound effect - ensure paths are correct for Windows
-      soundShoot = new BABYLON.Sound(
-        "shootSound",
-        "sounds/shoot.mp3", // Remove leading slash for Windows path compatibility
-        this.scene,
-        () => console.log("Shoot sound loaded successfully"),
-        {
-          loop: false,
-          autoplay: false,
-          volume: 0.7,
+      // Always use Web Audio API fallback system since we know it works in the test page
+      useFallbackAudio = true;
+      console.log("Using Web Audio API fallback system for all sounds");
+
+      // Get base path for sounds
+      const basePath = window.location.origin;
+      console.log("Base URL for sound loading:", basePath);
+
+      // Initialize fallback audio system
+      try {
+        // Create audio context with better error handling
+        try {
+          audioContext = new (window.AudioContext ||
+            (window as any).webkitAudioContext)();
+          console.log(
+            "✓ Audio context created successfully:",
+            audioContext?.state
+          );
+        } catch (audioContextError) {
+          console.error("Failed to create audio context:", audioContextError);
+          return; // Exit if we can't create an audio context
         }
-      );
 
-      soundJump = new BABYLON.Sound(
-        "jumpSound",
-        "sounds/jump.mp3", // Remove leading slash for Windows path compatibility
-        this.scene,
-        () => console.log("Jump sound loaded successfully"),
-        {
-          loop: false,
-          autoplay: false,
-          volume: 0.8,
+        // Function to verify sound is loaded
+        const testSound = (name: string) => {
+          if (audioBuffers[name]) {
+            console.log(`✓ Sound verified loaded: ${name}`);
+          } else {
+            console.error(`✗ Sound failed to load: ${name}`);
+          }
+        };
+
+        // Load and test each sound
+        Promise.all([
+          loadAudioBuffer(`${basePath}/sounds/shoot.mp3`, "shoot").then(() =>
+            testSound("shoot")
+          ),
+          loadAudioBuffer(`${basePath}/sounds/jump.mp3`, "jump").then(() =>
+            testSound("jump")
+          ),
+          loadAudioBuffer(`${basePath}/sounds/run.mp3`, "run").then(() =>
+            testSound("run")
+          ),
+          loadAudioBuffer(`${basePath}/sounds/die.mp3`, "die").then(() =>
+            testSound("die")
+          ),
+        ])
+          .then(() => {
+            console.log("All fallback sounds loaded successfully");
+          })
+          .catch((err) => {
+            console.error("Error loading some sounds:", err);
+          });
+      } catch (audioError: any) {
+        console.error("Failed to initialize fallback audio:", audioError);
+      }
+
+      // Skip Babylon sound loading since we're forcing fallback audio
+
+      // Play a test sound once on user interaction to unlock audio
+      const unlockAudio = () => {
+        console.log("User interaction detected - trying to unlock audio");
+
+        // Unlock the Web Audio API context
+        if (audioContext && audioContext.state === "suspended") {
+          try {
+            const resumePromise = audioContext.resume();
+            resumePromise
+              .then(() => {
+                console.log(
+                  "✓ Audio context resumed successfully, state:",
+                  audioContext?.state
+                );
+
+                // Play a test sound to verify
+                setTimeout(() => {
+                  console.log("Testing sound playback...");
+                  if (audioContext) playFallbackSound("shoot");
+                }, 500);
+              })
+              .catch((err: any) => {
+                console.error("Failed to resume audio context:", err);
+              });
+          } catch (resumeError) {
+            console.error("Error trying to resume audio context:", resumeError);
+          }
+        } else {
+          console.log(
+            "Audio context already active, state:",
+            audioContext?.state
+          );
+
+          // Play a test sound to verify anyway
+          setTimeout(() => {
+            console.log("Testing sound playback...");
+            if (audioContext) playFallbackSound("shoot");
+          }, 500);
         }
-      );
 
-      soundRun = new BABYLON.Sound(
-        "runSound",
-        "sounds/run.mp3", // Remove leading slash for Windows path compatibility
-        this.scene,
-        () => console.log("Run sound loaded successfully"),
-        {
-          loop: false,
-          autoplay: false,
-          volume: 0.5,
-        }
-      );
-
-      soundDie = new BABYLON.Sound(
-        "dieSound",
-        "sounds/die.mp3", // Remove leading slash for Windows path compatibility
-        this.scene,
-        () => console.log("Die sound loaded successfully"),
-        {
-          loop: false,
-          autoplay: false,
-          volume: 0.8,
-        }
-      );
-    } catch (error) {
-      console.error("Error loading sounds:", error);
-    }
-  }
-
-  private setupRunSound(): void {
-    if (!this.scene) return;
-
-    // Previous position to track movement
-    let prevPosition = { x: 0, z: 0 };
-
-    // Track player movement to trigger run sound
-    this.scene.registerBeforeRender(() => {
-      if (!this.camera || !this.localPlayer) return;
-
-      // Get current position
-      const currentPos = {
-        x: this.camera.position.x,
-        z: this.camera.position.z,
+        document.removeEventListener("click", unlockAudio);
+        document.removeEventListener("keydown", unlockAudio);
       };
 
-      // Calculate movement since last frame
-      const deltaX = currentPos.x - prevPosition.x;
-      const deltaZ = currentPos.z - prevPosition.z;
-      const distanceMoved = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
-
-      // Update previous position
-      prevPosition = { ...currentPos };
-
-      // Player is running if moving more than a threshold and not jumping/crouching
-      const isMovingNow =
-        distanceMoved > 0.05 &&
-        !this.localPlayer.isJumping &&
-        !this.localPlayer.isCrouching;
-
-      // Start run sound if just started moving
-      if (isMovingNow && !isRunning) {
-        isRunning = true;
-
-        // Play run sound at intervals while moving
-        if (!runSoundInterval) {
-          // Play sound immediately when starting to run
-          if (soundRun && !soundRun.isPlaying) {
-            soundRun.play();
-          }
-
-          // Then repeat at regular intervals
-          runSoundInterval = setInterval(() => {
-            if (soundRun && !soundRun.isPlaying && isRunning) {
-              soundRun.play();
-            }
-          }, 350); // Footstep interval
-        }
-      }
-      // Stop run sound if stopped moving
-      else if (!isMovingNow && isRunning) {
-        isRunning = false;
-
-        // Clear interval when stopped running
-        if (runSoundInterval) {
-          clearInterval(runSoundInterval);
-          runSoundInterval = null;
-        }
-      }
-    });
-  }
-
-  private createCrosshair(): void {
-    if (!BABYLON || !this.scene || !GUI) {
-      console.warn("Cannot create crosshair - GUI module not available");
-      return;
+      // Add event listeners to unlock audio on user interaction
+      document.addEventListener("click", unlockAudio);
+      document.addEventListener("keydown", unlockAudio);
+    } catch (error: any) {
+      console.error("Error loading sounds:", error);
     }
-
-    try {
-      // Create a simple crosshair using DOM instead of Babylon GUI
-      const crosshairHTML = document.createElement("div");
-      crosshairHTML.id = "crosshair";
-      crosshairHTML.style.position = "absolute";
-      crosshairHTML.style.top = "50%";
-      crosshairHTML.style.left = "50%";
-      crosshairHTML.style.width = "20px";
-      crosshairHTML.style.height = "20px";
-      crosshairHTML.style.transform = "translate(-50%, -50%)";
-      crosshairHTML.style.pointerEvents = "none";
-      crosshairHTML.innerHTML = `
-        <style>
-          #crosshair::before, #crosshair::after {
-            content: "";
-            position: absolute;
-            background-color: white;
-          }
-          #crosshair::before {
-            top: 50%;
-            left: 0;
-            right: 0;
-            height: 2px;
-            transform: translateY(-50%);
-          }
-          #crosshair::after {
-            left: 50%;
-            top: 0;
-            bottom: 0;
-            width: 2px;
-            transform: translateX(-50%);
-          }
-        </style>
-      `;
-
-      document.body.appendChild(crosshairHTML);
-
-      this.crosshair = crosshairHTML;
-    } catch (error) {
-      console.error("Failed to create crosshair:", error);
-    }
-  }
-
-  private createBoundaries(): void {
-    if (!BABYLON || !this.scene) return;
-
-    const wallHeight = 10;
-    const mapSize = 200; // Match the larger ground size
-    const wallThickness = 2;
-
-    // Create materials with lighter colors
-    const wallMaterial = new BABYLON.StandardMaterial(
-      "wallMaterial",
-      this.scene
-    );
-    wallMaterial.diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.8); // Light lavender
-    wallMaterial.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.3); // Subtle glow
-
-    // Create a wall texture programmatically
-    const wallTexture = new BABYLON.DynamicTexture(
-      "wallTexture",
-      { width: 512, height: 512 },
-      this.scene
-    );
-    const ctx = wallTexture.getContext();
-
-    // Fill with a light color
-    ctx.fillStyle = "rgb(180, 180, 220)"; // Light purple background
-    ctx.fillRect(0, 0, 512, 512);
-
-    // Add some pattern to the walls
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = "rgb(140, 140, 200)";
-
-    // Grid pattern
-    const cellSize = 64;
-    for (let x = 0; x <= 512; x += cellSize) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, 512);
-      ctx.stroke();
-    }
-
-    for (let y = 0; y <= 512; y += cellSize) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(512, y);
-      ctx.stroke();
-    }
-
-    // Add some random squares for variety
-    ctx.fillStyle = "rgba(160, 160, 230, 0.5)";
-    for (let i = 0; i < 20; i++) {
-      const x = Math.floor(Math.random() * 448);
-      const y = Math.floor(Math.random() * 448);
-      const size = 16 + Math.floor(Math.random() * 48);
-      ctx.fillRect(x, y, size, size);
-    }
-
-    wallTexture.update();
-    wallMaterial.diffuseTexture = wallTexture;
-
-    // Set texture scaling for the walls
-    if (wallMaterial.diffuseTexture) {
-      wallMaterial.diffuseTexture.uScale = 10;
-      wallMaterial.diffuseTexture.vScale = 2;
-    }
-
-    // Create four walls
-    // North wall
-    const northWall = BABYLON.MeshBuilder.CreateBox(
-      "northWall",
-      {
-        width: mapSize + wallThickness * 2,
-        height: wallHeight,
-        depth: wallThickness,
-      },
-      this.scene
-    );
-    northWall.position = new BABYLON.Vector3(
-      0,
-      wallHeight / 2,
-      mapSize / 2 + wallThickness / 2
-    );
-    northWall.material = wallMaterial;
-    northWall.checkCollisions = true;
-    this.walls.push(northWall);
-
-    // South wall
-    const southWall = BABYLON.MeshBuilder.CreateBox(
-      "southWall",
-      {
-        width: mapSize + wallThickness * 2,
-        height: wallHeight,
-        depth: wallThickness,
-      },
-      this.scene
-    );
-    southWall.position = new BABYLON.Vector3(
-      0,
-      wallHeight / 2,
-      -mapSize / 2 - wallThickness / 2
-    );
-    southWall.material = wallMaterial;
-    southWall.checkCollisions = true;
-    this.walls.push(southWall);
-
-    // East wall
-    const eastWall = BABYLON.MeshBuilder.CreateBox(
-      "eastWall",
-      { width: wallThickness, height: wallHeight, depth: mapSize },
-      this.scene
-    );
-    eastWall.position = new BABYLON.Vector3(
-      mapSize / 2 + wallThickness / 2,
-      wallHeight / 2,
-      0
-    );
-    eastWall.material = wallMaterial;
-    eastWall.checkCollisions = true;
-    this.walls.push(eastWall);
-
-    // West wall
-    const westWall = BABYLON.MeshBuilder.CreateBox(
-      "westWall",
-      { width: wallThickness, height: wallHeight, depth: mapSize },
-      this.scene
-    );
-    westWall.position = new BABYLON.Vector3(
-      -mapSize / 2 - wallThickness / 2,
-      wallHeight / 2,
-      0
-    );
-    westWall.material = wallMaterial;
-    westWall.checkCollisions = true;
-    this.walls.push(westWall);
-  }
-
-  private setupInputHandling(): void {
-    if (!this.scene) return;
-
-    // Handle shooting with mouse down, not just clicks
-    let isMouseDown = false;
-    let shootingInterval: any = null;
-
-    // Mouse down event for continuous shooting
-    this.scene.onPointerDown = (evt: any) => {
-      try {
-        if (evt.button === 0) {
-          // Left button
-          isMouseDown = true;
-          this.shoot(); // Shoot immediately when pressed
-
-          // Set interval for continuous shooting
-          if (!shootingInterval) {
-            shootingInterval = setInterval(() => {
-              if (isMouseDown) {
-                this.shoot();
-              }
-            }, 200); // Shoot every 200ms
-          }
-        }
-      } catch (error) {
-        console.error("Error in onPointerDown:", error);
-      }
-    };
-
-    // Mouse up event to stop shooting
-    this.scene.onPointerUp = (evt: any) => {
-      try {
-        if (evt.button === 0) {
-          // Left button
-          isMouseDown = false;
-
-          // Clear shooting interval
-          if (shootingInterval) {
-            clearInterval(shootingInterval);
-            shootingInterval = null;
-          }
-        }
-      } catch (error) {
-        console.error("Error in onPointerUp:", error);
-      }
-    };
-
-    // Handle jumping and crouching
-    this.scene.onKeyboardObservable.add((kbInfo: any) => {
-      try {
-        if (!this.localPlayer) return;
-
-        switch (kbInfo.type) {
-          case BABYLON.KeyboardEventTypes.KEYDOWN:
-            if (kbInfo.event.key === " " && !this.localPlayer.isJumping) {
-              this.jump();
-            } else if (kbInfo.event.key === "Shift") {
-              this.crouch(true);
-            }
-            break;
-          case BABYLON.KeyboardEventTypes.KEYUP:
-            if (kbInfo.event.key === "Shift") {
-              this.crouch(false);
-            }
-            break;
-        }
-      } catch (error) {
-        console.error("Error in keyboard handling:", error);
-      }
-    });
-
-    // Lock the pointer when clicking in the canvas with better error handling
-    this.canvas.addEventListener("click", () => {
-      try {
-        if (!this.scene.isPointerLock) {
-          this.canvas.requestPointerLock =
-            this.canvas.requestPointerLock ||
-            (this.canvas as any).mozRequestPointerLock ||
-            (this.canvas as any).webkitRequestPointerLock;
-
-          if (this.canvas.requestPointerLock) {
-            this.canvas.requestPointerLock();
-          }
-        }
-      } catch (error) {
-        console.error("Error requesting pointer lock:", error);
-      }
-    });
-
-    // Safer handling of pointer lock changes
-    const pointerlockChangeHandler = () => {
-      try {
-        if (document.pointerLockElement !== this.canvas) {
-          // Pointer lock was lost, clear shooting interval
-          isMouseDown = false;
-          if (shootingInterval) {
-            clearInterval(shootingInterval);
-            shootingInterval = null;
-          }
-        }
-      } catch (error) {
-        console.error("Error handling pointerlockchange:", error);
-      }
-    };
-
-    document.addEventListener("pointerlockchange", pointerlockChangeHandler);
-    document.addEventListener("mozpointerlockchange", pointerlockChangeHandler);
-    document.addEventListener(
-      "webkitpointerlockchange",
-      pointerlockChangeHandler
-    );
   }
 
   private shoot(): void {
@@ -882,21 +646,47 @@ export class GameEngine {
 
     // Play shoot sound with better error handling
     try {
-      if (soundShoot) {
+      if (useFallbackAudio) {
+        // Use the fallback sound system
+        playFallbackSound("shoot");
+      } else if (soundShoot) {
         // Check sound exists
         if (!soundShoot.isPlaying) {
           // Only play if not already playing
-          soundShoot.play();
-          console.log("Playing shoot sound");
+          console.log("Attempting to play shoot sound...");
+          try {
+            const promise = soundShoot.play();
+            // Only call .then() and .catch() if promise is actually a Promise
+            if (promise && typeof promise.then === "function") {
+              promise
+                .then(() => {
+                  console.log("Shoot sound played successfully");
+                })
+                .catch((error: any) => {
+                  console.error("Could not play shoot sound:", error);
+                  // Try fallback as well
+                  playFallbackSound("shoot");
+                  useFallbackAudio = true;
+                });
+            }
+          } catch (playError) {
+            console.error("Error calling play():", playError);
+            playFallbackSound("shoot");
+            useFallbackAudio = true;
+          }
         }
       } else {
-        console.warn("Shoot sound not loaded");
+        console.warn("Shoot sound not loaded or null");
+        // Try fallback as well
+        playFallbackSound("shoot");
       }
     } catch (error) {
       console.error("Error playing shoot sound:", error);
+      // Try fallback as last resort
+      playFallbackSound("shoot");
     }
 
-    // Play recoil animation
+    // Rest of the function remains the same...
     this.isRecoiling = true;
     const weapon = this.getOrCreateWeapon();
 
@@ -2059,18 +1849,44 @@ export class GameEngine {
 
     // Play jump sound with additional error handling
     try {
-      if (soundJump) {
+      if (useFallbackAudio) {
+        // Use the fallback sound system
+        playFallbackSound("jump");
+      } else if (soundJump) {
         // Check sound exists
         if (!soundJump.isPlaying) {
           // Only play if not already playing
-          soundJump.play();
-          console.log("Playing jump sound");
+          console.log("Attempting to play jump sound...");
+          try {
+            const promise = soundJump.play();
+            // Only call .then() and .catch() if promise is actually a Promise
+            if (promise && typeof promise.then === "function") {
+              promise
+                .then(() => {
+                  console.log("Jump sound played successfully");
+                })
+                .catch((error: any) => {
+                  console.error("Could not play jump sound:", error);
+                  // Try fallback as well
+                  playFallbackSound("jump");
+                  useFallbackAudio = true;
+                });
+            }
+          } catch (playError) {
+            console.error("Error calling play() on jump sound:", playError);
+            playFallbackSound("jump");
+            useFallbackAudio = true;
+          }
         }
       } else {
-        console.warn("Jump sound not loaded");
+        console.warn("Jump sound not loaded or null");
+        // Try fallback as well
+        playFallbackSound("jump");
       }
     } catch (error) {
       console.error("Error playing jump sound:", error);
+      // Try fallback as last resort
+      playFallbackSound("jump");
     }
 
     console.log("Player initiating jump");
@@ -2590,5 +2406,405 @@ export class GameEngine {
   // Add a method to get the current local player
   public getLocalPlayer(): Player | null {
     return this.localPlayer;
+  }
+
+  private createCrosshair(): void {
+    if (!BABYLON || !this.scene || !GUI) {
+      console.warn("Cannot create crosshair - GUI module not available");
+      return;
+    }
+
+    try {
+      // Create a simple crosshair using DOM instead of Babylon GUI
+      const crosshairHTML = document.createElement("div");
+      crosshairHTML.id = "crosshair";
+      crosshairHTML.style.position = "absolute";
+      crosshairHTML.style.top = "50%";
+      crosshairHTML.style.left = "50%";
+      crosshairHTML.style.width = "20px";
+      crosshairHTML.style.height = "20px";
+      crosshairHTML.style.transform = "translate(-50%, -50%)";
+      crosshairHTML.style.pointerEvents = "none";
+      crosshairHTML.innerHTML = `
+        <style>
+          #crosshair::before, #crosshair::after {
+            content: "";
+            position: absolute;
+            background-color: white;
+          }
+          #crosshair::before {
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            transform: translateY(-50%);
+          }
+          #crosshair::after {
+            left: 50%;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            transform: translateX(-50%);
+          }
+        </style>
+      `;
+
+      document.body.appendChild(crosshairHTML);
+
+      this.crosshair = crosshairHTML;
+    } catch (error) {
+      console.error("Failed to create crosshair:", error);
+    }
+  }
+
+  private createBoundaries(): void {
+    if (!BABYLON || !this.scene) return;
+
+    const wallHeight = 10;
+    const mapSize = 200; // Match the larger ground size
+    const wallThickness = 2;
+
+    // Create materials with lighter colors
+    const wallMaterial = new BABYLON.StandardMaterial(
+      "wallMaterial",
+      this.scene
+    );
+    wallMaterial.diffuseColor = new BABYLON.Color3(0.6, 0.6, 0.8); // Light lavender
+    wallMaterial.emissiveColor = new BABYLON.Color3(0.2, 0.2, 0.3); // Subtle glow
+
+    // Create a wall texture programmatically
+    const wallTexture = new BABYLON.DynamicTexture(
+      "wallTexture",
+      { width: 512, height: 512 },
+      this.scene
+    );
+    const ctx = wallTexture.getContext();
+
+    // Fill with a light color
+    ctx.fillStyle = "rgb(180, 180, 220)"; // Light purple background
+    ctx.fillRect(0, 0, 512, 512);
+
+    // Add some pattern to the walls
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgb(140, 140, 200)";
+
+    // Grid pattern
+    const cellSize = 64;
+    for (let x = 0; x <= 512; x += cellSize) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, 512);
+      ctx.stroke();
+    }
+
+    for (let y = 0; y <= 512; y += cellSize) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(512, y);
+      ctx.stroke();
+    }
+
+    // Add some random squares for variety
+    ctx.fillStyle = "rgba(160, 160, 230, 0.5)";
+    for (let i = 0; i < 20; i++) {
+      const x = Math.floor(Math.random() * 448);
+      const y = Math.floor(Math.random() * 448);
+      const size = 16 + Math.floor(Math.random() * 48);
+      ctx.fillRect(x, y, size, size);
+    }
+
+    wallTexture.update();
+    wallMaterial.diffuseTexture = wallTexture;
+
+    // Set texture scaling for the walls
+    if (wallMaterial.diffuseTexture) {
+      wallMaterial.diffuseTexture.uScale = 10;
+      wallMaterial.diffuseTexture.vScale = 2;
+    }
+
+    // Create four walls
+    // North wall
+    const northWall = BABYLON.MeshBuilder.CreateBox(
+      "northWall",
+      {
+        width: mapSize + wallThickness * 2,
+        height: wallHeight,
+        depth: wallThickness,
+      },
+      this.scene
+    );
+    northWall.position = new BABYLON.Vector3(
+      0,
+      wallHeight / 2,
+      mapSize / 2 + wallThickness / 2
+    );
+    northWall.material = wallMaterial;
+    northWall.checkCollisions = true;
+    this.walls.push(northWall);
+
+    // South wall
+    const southWall = BABYLON.MeshBuilder.CreateBox(
+      "southWall",
+      {
+        width: mapSize + wallThickness * 2,
+        height: wallHeight,
+        depth: wallThickness,
+      },
+      this.scene
+    );
+    southWall.position = new BABYLON.Vector3(
+      0,
+      wallHeight / 2,
+      -mapSize / 2 - wallThickness / 2
+    );
+    southWall.material = wallMaterial;
+    southWall.checkCollisions = true;
+    this.walls.push(southWall);
+
+    // East wall
+    const eastWall = BABYLON.MeshBuilder.CreateBox(
+      "eastWall",
+      { width: wallThickness, height: wallHeight, depth: mapSize },
+      this.scene
+    );
+    eastWall.position = new BABYLON.Vector3(
+      mapSize / 2 + wallThickness / 2,
+      wallHeight / 2,
+      0
+    );
+    eastWall.material = wallMaterial;
+    eastWall.checkCollisions = true;
+    this.walls.push(eastWall);
+
+    // West wall
+    const westWall = BABYLON.MeshBuilder.CreateBox(
+      "westWall",
+      { width: wallThickness, height: wallHeight, depth: mapSize },
+      this.scene
+    );
+    westWall.position = new BABYLON.Vector3(
+      -mapSize / 2 - wallThickness / 2,
+      wallHeight / 2,
+      0
+    );
+    westWall.material = wallMaterial;
+    westWall.checkCollisions = true;
+    this.walls.push(westWall);
+  }
+
+  private setupRunSound(): void {
+    if (!this.scene) return;
+
+    // Previous position to track movement
+    let prevPosition = { x: 0, z: 0 };
+
+    // Track player movement to trigger run sound
+    this.scene.registerBeforeRender(() => {
+      if (!this.camera || !this.localPlayer) return;
+
+      // Get current position
+      const currentPos = {
+        x: this.camera.position.x,
+        z: this.camera.position.z,
+      };
+
+      // Calculate movement since last frame
+      const deltaX = currentPos.x - prevPosition.x;
+      const deltaZ = currentPos.z - prevPosition.z;
+      const distanceMoved = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+
+      // Update previous position
+      prevPosition = { ...currentPos };
+
+      // Player is running if moving more than a threshold and not jumping/crouching
+      const isMovingNow =
+        distanceMoved > 0.05 &&
+        !this.localPlayer.isJumping &&
+        !this.localPlayer.isCrouching;
+
+      // Start run sound if just started moving
+      if (isMovingNow && !isRunning) {
+        isRunning = true;
+
+        // Play run sound at intervals while moving
+        if (!runSoundInterval) {
+          // Play sound immediately when starting to run
+          if (soundRun && !soundRun.isPlaying) {
+            try {
+              if (useFallbackAudio) {
+                playFallbackSound("run");
+              } else {
+                const promise = soundRun.play();
+                // Only call .then() and .catch() if promise is actually a Promise
+                if (promise && typeof promise.then === "function") {
+                  promise
+                    .then(() => {
+                      console.log("Run sound played successfully");
+                    })
+                    .catch((error: any) => {
+                      console.error("Could not play run sound:", error);
+                      playFallbackSound("run");
+                      useFallbackAudio = true;
+                    });
+                }
+              }
+            } catch (error) {
+              console.error("Error playing run sound:", error);
+              if (useFallbackAudio) {
+                playFallbackSound("run");
+              }
+            }
+          }
+
+          // Then repeat at regular intervals
+          runSoundInterval = setInterval(() => {
+            if (!isRunning) return;
+
+            if (useFallbackAudio) {
+              playFallbackSound("run");
+            } else if (soundRun && !soundRun.isPlaying) {
+              try {
+                const promise = soundRun.play();
+                // Only call .catch() if promise is actually a Promise
+                if (promise && typeof promise.catch === "function") {
+                  promise.catch((error: any) => {
+                    console.error("Could not play run sound:", error);
+                    playFallbackSound("run");
+                    useFallbackAudio = true;
+                  });
+                }
+              } catch (error) {
+                console.error("Error in run sound interval:", error);
+                playFallbackSound("run");
+                useFallbackAudio = true;
+              }
+            }
+          }, 350); // Footstep interval
+        }
+      }
+      // Stop run sound if stopped moving
+      else if (!isMovingNow && isRunning) {
+        isRunning = false;
+
+        // Clear interval when stopped running
+        if (runSoundInterval) {
+          clearInterval(runSoundInterval);
+          runSoundInterval = null;
+        }
+      }
+    });
+  }
+
+  private setupInputHandling(): void {
+    if (!this.scene) return;
+
+    // Handle shooting with mouse down, not just clicks
+    let isMouseDown = false;
+    let shootingInterval: any = null;
+
+    // Mouse down event for continuous shooting
+    this.scene.onPointerDown = (evt: any) => {
+      try {
+        if (evt.button === 0) {
+          // Left button
+          isMouseDown = true;
+          this.shoot(); // Shoot immediately when pressed
+
+          // Set interval for continuous shooting
+          if (!shootingInterval) {
+            shootingInterval = setInterval(() => {
+              if (isMouseDown) {
+                this.shoot();
+              }
+            }, 200); // Shoot every 200ms
+          }
+        }
+      } catch (error) {
+        console.error("Error in onPointerDown:", error);
+      }
+    };
+
+    // Mouse up event to stop shooting
+    this.scene.onPointerUp = (evt: any) => {
+      try {
+        if (evt.button === 0) {
+          // Left button
+          isMouseDown = false;
+
+          // Clear shooting interval
+          if (shootingInterval) {
+            clearInterval(shootingInterval);
+            shootingInterval = null;
+          }
+        }
+      } catch (error) {
+        console.error("Error in onPointerUp:", error);
+      }
+    };
+
+    // Handle jumping and crouching
+    this.scene.onKeyboardObservable.add((kbInfo: any) => {
+      try {
+        if (!this.localPlayer) return;
+
+        switch (kbInfo.type) {
+          case BABYLON.KeyboardEventTypes.KEYDOWN:
+            if (kbInfo.event.key === " " && !this.localPlayer.isJumping) {
+              this.jump();
+            } else if (kbInfo.event.key === "Shift") {
+              this.crouch(true);
+            }
+            break;
+          case BABYLON.KeyboardEventTypes.KEYUP:
+            if (kbInfo.event.key === "Shift") {
+              this.crouch(false);
+            }
+            break;
+        }
+      } catch (error) {
+        console.error("Error in keyboard handling:", error);
+      }
+    });
+
+    // Lock the pointer when clicking in the canvas with better error handling
+    this.canvas.addEventListener("click", () => {
+      try {
+        if (!this.scene.isPointerLock) {
+          this.canvas.requestPointerLock =
+            this.canvas.requestPointerLock ||
+            (this.canvas as any).mozRequestPointerLock ||
+            (this.canvas as any).webkitRequestPointerLock;
+
+          if (this.canvas.requestPointerLock) {
+            this.canvas.requestPointerLock();
+          }
+        }
+      } catch (error) {
+        console.error("Error requesting pointer lock:", error);
+      }
+    });
+
+    // Safer handling of pointer lock changes
+    const pointerlockChangeHandler = () => {
+      try {
+        if (document.pointerLockElement !== this.canvas) {
+          // Pointer lock was lost, clear shooting interval
+          isMouseDown = false;
+          if (shootingInterval) {
+            clearInterval(shootingInterval);
+            shootingInterval = null;
+          }
+        }
+      } catch (error) {
+        console.error("Error handling pointerlockchange:", error);
+      }
+    };
+
+    document.addEventListener("pointerlockchange", pointerlockChangeHandler);
+    document.addEventListener("mozpointerlockchange", pointerlockChangeHandler);
+    document.addEventListener(
+      "webkitpointerlockchange",
+      pointerlockChangeHandler
+    );
   }
 }
