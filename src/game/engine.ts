@@ -791,25 +791,10 @@ export class GameEngine {
         this.camera.position.z
       ).add(direction.scale(1)); // Start 1 unit in front of camera
 
-      // Add a trail effect to make projectile more visible - fix the black artifact
-      const trail = new BABYLON.TrailMesh(
-        "trail" + projectileId,
-        projectile,
-        this.scene,
-        0.05, // Smaller trail width
-        15, // Shorter trail
-        true
-      );
-      const trailMaterial = new BABYLON.StandardMaterial(
-        "trailMaterial" + projectileId,
-        this.scene
-      );
-      trailMaterial.emissiveColor = new BABYLON.Color3(1, 0.3, 0.3);
-      trailMaterial.diffuseColor = new BABYLON.Color3(1, 0.05, 0.05);
-      trailMaterial.alpha = 0.7;
-      trailMaterial.specularColor = new BABYLON.Color3(0, 0, 0); // Prevent black artifact
-      trailMaterial.backFaceCulling = false; // Fix rendering issues
-      trail.material = trailMaterial;
+      // Trail will be created later after the projectile has traveled some distance
+      let trail: any = null;
+      let trailCreated = false;
+      const MIN_TRAIL_DISTANCE = 3.0; // Minimum distance projectile must travel before showing trail
 
       // Simple projectile motion
       const speed = this.settings.projectileSpeed;
@@ -825,6 +810,7 @@ export class GameEngine {
         shooterId: this.localPlayer.id,
         damage: exactDamage,
         velocity: velocity,
+        initialPosition: projectile.position.clone(), // Store initial position to calculate distance traveled
       };
 
       // Always use simple motion as the more reliable approach
@@ -836,9 +822,48 @@ export class GameEngine {
           if (useSimpleMotion && !projectile.isDisposed()) {
             // Simple manual motion
             if (projectile.metadata?.velocity) {
-              projectile.position.addInPlace(
-                projectile.metadata.velocity.scale(0.016) // Scale by time delta
-              );
+              const movement = projectile.metadata.velocity.scale(0.016); // Scale by time delta
+              projectile.position.addInPlace(movement);
+
+              // Create trail only after the projectile has traveled some distance
+              if (!trailCreated) {
+                const distanceTraveled = BABYLON.Vector3.Distance(
+                  projectile.position,
+                  projectile.metadata.initialPosition
+                );
+
+                if (distanceTraveled >= MIN_TRAIL_DISTANCE) {
+                  // Create trail now that the projectile is far enough away
+                  trail = new BABYLON.TrailMesh(
+                    "trail-" + projectileId,
+                    projectile,
+                    this.scene,
+                    0.05, // Width
+                    15, // Length
+                    true // Update every frame
+                  );
+
+                  const trailMaterial = new BABYLON.StandardMaterial(
+                    "trailMaterial-" + projectileId,
+                    this.scene
+                  );
+                  trailMaterial.emissiveColor = new BABYLON.Color3(1, 0.3, 0.3);
+                  trailMaterial.diffuseColor = new BABYLON.Color3(
+                    1,
+                    0.05,
+                    0.05
+                  );
+                  trailMaterial.alpha = 0.7;
+                  trailMaterial.specularColor = new BABYLON.Color3(0, 0, 0); // Prevent black artifact
+                  trailMaterial.backFaceCulling = false; // Fix rendering issues
+                  trail.material = trailMaterial;
+
+                  trailCreated = true;
+                }
+              } else if (trail && !trail.isDisposed()) {
+                // Ensure trail follows correctly once created
+                trail.update();
+              }
             }
 
             // Simple collision detection with other players
@@ -1107,15 +1132,69 @@ export class GameEngine {
    * Get a random spawn position for respawning players
    */
   private getRandomSpawnPosition(): any {
-    const spawnRadius = 80; // Half the map size
+    // Use a larger radius to utilize more of the map
+    const spawnRadius = 80; // Half the map size (200/2 - margin)
+
+    // Generate a truly random angle in radians (0 to 2π)
     const angle = Math.random() * Math.PI * 2;
-    const distance = Math.random() * spawnRadius;
+
+    // Use square root of random value for better distribution across the radius
+    // This prevents clustering near the center
+    const distanceFactor = Math.sqrt(Math.random());
+    const distance = distanceFactor * spawnRadius;
+
+    // Compute position using polar coordinates
+    const x = Math.cos(angle) * distance;
+    const z = Math.sin(angle) * distance;
+
+    console.log(
+      `Spawning player at random position: (${x.toFixed(2)}, ${z.toFixed(2)})`
+    );
 
     return {
-      x: Math.cos(angle) * distance,
+      x: x,
       y: 0, // On the ground
-      z: Math.sin(angle) * distance,
+      z: z,
     };
+  }
+
+  // Respawn local player at a random position
+  private respawnLocalPlayer(): void {
+    if (!this.localPlayer || !this.camera) return;
+
+    // Reset health to max
+    this.localPlayer.health = this.settings.maxHealth;
+
+    // Get a random spawn position
+    const spawnPos = this.getRandomSpawnPosition();
+
+    // Move the camera to spawn position with a slight delay to avoid physics issues
+    setTimeout(() => {
+      if (this.camera) {
+        this.camera.position = new BABYLON.Vector3(
+          spawnPos.x,
+          1.8, // Fixed height off the ground
+          spawnPos.z
+        );
+
+        // Make sure player is facing a random direction
+        this.camera.rotation.y = Math.random() * Math.PI * 2;
+
+        console.log("Player respawned at:", spawnPos);
+      }
+    }, 100);
+
+    // Reset jumping and velocity
+    this.localPlayer.isJumping = false;
+    this.localPlayer.velocity = { x: 0, y: 0, z: 0 };
+
+    // Ensure UI gets updated with new health value
+    if (this.onLocalPlayerHitCallback) {
+      this.onLocalPlayerHitCallback(this.localPlayer.health);
+    }
+
+    // Update server with new player state
+    this.sendPlayerUpdate();
   }
 
   public setLocalPlayer(player: Player): void {
@@ -2402,36 +2481,6 @@ export class GameEngine {
     }, 3000);
   }
 
-  // Respawn local player at a random position
-  private respawnLocalPlayer(): void {
-    if (!this.localPlayer || !this.camera) return;
-
-    // Reset health to max
-    this.localPlayer.health = this.settings.maxHealth;
-
-    // Get a random spawn position
-    const spawnPos = this.getRandomSpawnPosition();
-
-    // Move the camera to spawn position
-    this.camera.position = new BABYLON.Vector3(
-      spawnPos.x,
-      1.8, // Fixed height off the ground
-      spawnPos.z
-    );
-
-    // Reset jumping and velocity
-    this.localPlayer.isJumping = false;
-    this.localPlayer.velocity = { x: 0, y: 0, z: 0 };
-
-    // Ensure UI gets updated with new health value
-    if (this.onLocalPlayerHitCallback) {
-      this.onLocalPlayerHitCallback(this.localPlayer.health);
-    }
-
-    // Update server with new player state
-    this.sendPlayerUpdate();
-  }
-
   // Update local player stats to server after being hit
   private async updateLocalPlayerStats(): Promise<void> {
     try {
@@ -2731,6 +2780,35 @@ export class GameEngine {
     // Handle shooting with mouse down, not just clicks
     let isMouseDown = false;
     let shootingInterval: any = null;
+    let keyStates: Record<string, boolean> = {}; // Track key states
+
+    // Fix for the jumping when moving forward and shooting issue
+    let isWKeyPressed = false;
+    let isShooting = false;
+    let hasJumpedForShoot = false;
+
+    // Keyboard handler to prevent unintended jumps when shooting
+    const handleKeyDown = (e: KeyboardEvent) => {
+      keyStates[e.key] = true;
+
+      // Special handling for W key (forward movement)
+      if (e.key === "w" || e.key === "W" || e.keyCode === 87) {
+        isWKeyPressed = true;
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      keyStates[e.key] = false;
+
+      // Special handling for W key (forward movement)
+      if (e.key === "w" || e.key === "W" || e.keyCode === 87) {
+        isWKeyPressed = false;
+      }
+    };
+
+    // Add event listeners for key tracking
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
 
     // Mouse down event for continuous shooting
     this.scene.onPointerDown = (evt: any) => {
@@ -2738,12 +2816,29 @@ export class GameEngine {
         if (evt.button === 0) {
           // Left button
           isMouseDown = true;
+          isShooting = true;
+
+          // Check if W key is pressed and prevent jump only in that case
+          if (isWKeyPressed && !this.localPlayer?.isJumping) {
+            // We're shooting while moving forward - add a temporary flag to prevent jumping
+            hasJumpedForShoot = true;
+            console.log("Preventing jump due to forward movement + shooting");
+          }
+
           this.shoot(); // Shoot immediately when pressed
 
           // Set interval for continuous shooting
           if (!shootingInterval) {
             shootingInterval = setInterval(() => {
               if (isMouseDown) {
+                // Make sure the W key state is up to date
+                if (isWKeyPressed && !hasJumpedForShoot) {
+                  hasJumpedForShoot = true;
+                  console.log(
+                    "Preventing jump in interval due to forward movement + shooting"
+                  );
+                }
+
                 this.shoot();
               }
             }, 200); // Shoot every 200ms
@@ -2760,6 +2855,8 @@ export class GameEngine {
         if (evt.button === 0) {
           // Left button
           isMouseDown = false;
+          isShooting = false;
+          hasJumpedForShoot = false; // Reset the flag
 
           // Clear shooting interval
           if (shootingInterval) {
@@ -2772,21 +2869,50 @@ export class GameEngine {
       }
     };
 
-    // Handle jumping and crouching
+    // Handle jumping and crouching with additional safeguards
     this.scene.onKeyboardObservable.add((kbInfo: any) => {
       try {
         if (!this.localPlayer) return;
 
         switch (kbInfo.type) {
           case BABYLON.KeyboardEventTypes.KEYDOWN:
+            // Update key states
+            const key = kbInfo.event.key.toLowerCase();
+            keyStates[key] = true;
+
+            // Special handling for W key
+            if (key === "w") {
+              isWKeyPressed = true;
+            }
+
+            // Only trigger jump if spacebar is explicitly pressed and not during W+shoot
             if (kbInfo.event.key === " " && !this.localPlayer.isJumping) {
-              this.jump();
+              // Don't jump if we're shooting while moving forward
+              if (isWKeyPressed && isShooting) {
+                console.log("Jump prevented due to W+shoot combination");
+                hasJumpedForShoot = true;
+              } else if (!hasJumpedForShoot) {
+                this.jump();
+              }
             } else if (kbInfo.event.key === "Shift") {
               this.crouch(true);
             }
             break;
+
           case BABYLON.KeyboardEventTypes.KEYUP:
-            if (kbInfo.event.key === "Shift") {
+            // Update keyStates
+            const keyUp = kbInfo.event.key.toLowerCase();
+            keyStates[keyUp] = false;
+
+            // Special handling for W key
+            if (keyUp === "w") {
+              isWKeyPressed = false;
+            }
+
+            if (kbInfo.event.key === " ") {
+              // Reset jump flag on spacebar release
+              hasJumpedForShoot = false;
+            } else if (kbInfo.event.key === "Shift") {
               this.crouch(false);
             }
             break;
@@ -2795,6 +2921,8 @@ export class GameEngine {
         console.error("Error in keyboard handling:", error);
       }
     });
+
+    // Rest of the function remains the same...
 
     // Lock the pointer when clicking in the canvas with better error handling
     this.canvas.addEventListener("click", () => {
@@ -2820,6 +2948,9 @@ export class GameEngine {
         if (document.pointerLockElement !== this.canvas) {
           // Pointer lock was lost, clear shooting interval
           isMouseDown = false;
+          isShooting = false;
+          hasJumpedForShoot = false;
+
           if (shootingInterval) {
             clearInterval(shootingInterval);
             shootingInterval = null;
@@ -2836,5 +2967,11 @@ export class GameEngine {
       "webkitpointerlockchange",
       pointerlockChangeHandler
     );
+
+    // Clean up event listeners when the scene is disposed
+    this.scene.onDisposeObservable.add(() => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    });
   }
 }
