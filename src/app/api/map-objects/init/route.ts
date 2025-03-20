@@ -124,11 +124,15 @@ function createDefaultMapObjects() {
 
 export async function GET() {
   try {
+    console.log("API: Starting map objects initialization");
+
     // Create a Supabase client directly
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
+
+    console.log("API: Supabase client created");
 
     // Check if map objects already exist
     const { data: existingObjects, error: fetchError } = await supabase
@@ -137,7 +141,10 @@ export async function GET() {
       .limit(1);
 
     if (fetchError) {
-      console.error("Error checking for existing map objects:", fetchError);
+      console.error(
+        "API: Error checking for existing map objects:",
+        fetchError
+      );
       return NextResponse.json(
         { error: "Failed to check existing objects" },
         { status: 500 }

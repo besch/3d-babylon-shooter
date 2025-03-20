@@ -4,7 +4,7 @@ Code Style and Structure
 
 - Write concise, technical TypeScript code with accurate examples.
 - Use functional and declarative programming patterns; avoid classes.
-- Prefer iteration and modularization over code duplication.
+- Prefer iteration, modularization and reusablity over code duplication.
 - Use descriptive variable names with auxiliary verbs (e.g., isLoading, hasError).
 - Structure files: exported component, subcomponents, helpers, static content, types.
 
@@ -15,9 +15,11 @@ Naming Conventions
 
 TypeScript Usage
 
-- Use TypeScript for all code; prefer interfaces over types. Provide proper typing instead of "any"
+- Use TypeScript for all code; prefer interfaces over types.
+- You are not allowed to use "any" type, you need to use proper types everywhere.
 - Avoid enums; use maps instead.
 - Use functional components with TypeScript interfaces.
+- Try to use neverthrow npm package where possible to catch errors.
 
 Syntax and Formatting
 
