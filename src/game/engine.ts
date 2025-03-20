@@ -169,6 +169,22 @@ const debouncedSendPlayerUpdate = (() => {
   };
 })();
 
+// Helper function to convert BABYLON.Color3 to hex string
+function colorToHex(color: any, alpha = 1.0): string {
+  // Make sure we have maximum values of 1.0
+  const r = Math.min(Math.round(color.r * 255), 255);
+  const g = Math.min(Math.round(color.g * 255), 255);
+  const b = Math.min(Math.round(color.b * 255), 255);
+
+  if (alpha < 1.0) {
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+
+  return `#${r.toString(16).padStart(2, "0")}${g
+    .toString(16)
+    .padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+}
+
 // Only initialize on client side
 async function loadBabylonModules() {
   if (typeof window !== "undefined" && !BABYLON) {
@@ -486,8 +502,8 @@ export class GameEngine {
       "groundMaterial",
       this.scene
     );
-    groundMaterial.diffuseColor = new BABYLON.Color3(0.95, 0.95, 0.97); // Very light blue-grey color
-    groundMaterial.specularColor = new BABYLON.Color3(0.3, 0.3, 0.4);
+    groundMaterial.diffuseColor = new BABYLON.Color3(0.98, 0.98, 0.99); // Nearly white color
+    groundMaterial.specularColor = new BABYLON.Color3(0.4, 0.4, 0.5);
 
     // Create a texture programmatically
     const gridTexture = new BABYLON.DynamicTexture(
@@ -497,16 +513,17 @@ export class GameEngine {
     );
     const ctx = gridTexture.getContext();
 
-    // Fill with a light grey color
-    ctx.fillStyle = "rgb(220, 220, 220)";
+    // Fill with very light color
+    ctx.fillStyle = "#f8f9ff";
     ctx.fillRect(0, 0, 1024, 1024);
 
-    // Add some texture/pattern to the ground
+    // Draw light grid lines
+    ctx.strokeStyle = "#d8e0ff";
     ctx.lineWidth = 1;
-    ctx.strokeStyle = "rgb(200, 200, 200)";
 
-    // Draw grid lines
-    for (let i = 0; i <= 1024; i += 32) {
+    // Draw a light grid
+    const gridSize = 64;
+    for (let i = 0; i <= 1024; i += gridSize) {
       // Vertical lines
       ctx.beginPath();
       ctx.moveTo(i, 0);
@@ -520,27 +537,34 @@ export class GameEngine {
       ctx.stroke();
     }
 
-    // Add some random subtle noise for texture
-    ctx.fillStyle = "rgba(180, 180, 180, 0.1)";
-    for (let i = 0; i < 500; i++) {
+    // Add some subtle texture variation
+    for (let i = 0; i < 100; i++) {
       const x = Math.random() * 1024;
       const y = Math.random() * 1024;
-      const size = 2 + Math.random() * 10;
+      const size = 20 + Math.random() * 40;
+
+      ctx.fillStyle = `rgba(230, 240, 255, ${Math.random() * 0.2})`;
       ctx.beginPath();
       ctx.arc(x, y, size, 0, Math.PI * 2);
       ctx.fill();
     }
 
     gridTexture.update();
+
+    // Apply the texture to the ground
     groundMaterial.diffuseTexture = gridTexture;
 
-    // Set texture scaling for the ground
-    if (groundMaterial.diffuseTexture) {
-      groundMaterial.diffuseTexture.uScale = 20;
-      groundMaterial.diffuseTexture.vScale = 20;
-    }
+    // Set other material properties
+    groundMaterial.specularPower = 64;
 
     this.ground.material = groundMaterial;
+
+    // Make grid lines appear sharper
+    const diffuseTexture = groundMaterial.diffuseTexture;
+    if (diffuseTexture) {
+      diffuseTexture.wrapU = BABYLON.Texture.WRAP_ADDRESSMODE;
+      diffuseTexture.wrapV = BABYLON.Texture.WRAP_ADDRESSMODE;
+    }
   }
 
   private loadSounds(): void {
@@ -1534,18 +1558,28 @@ export class GameEngine {
 
     // Create a very light fog for cyberpunk atmosphere
     this.scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-    this.scene.fogDensity = 0.003; // Reduced fog density further
-    this.scene.fogColor = new BABYLON.Color3(0.9, 0.95, 1.0); // Very light blue fog
+    this.scene.fogDensity = 0.002; // Even less fog density
+    this.scene.fogColor = new BABYLON.Color3(0.95, 0.97, 1.0); // Almost white with slight blue tint
 
-    // Add a stronger ambient light
+    // Add a brighter ambient light for the whole scene
     const ambientLight = new BABYLON.HemisphericLight(
       "ambientLight",
       new BABYLON.Vector3(0, 1, 0),
       this.scene
     );
-    ambientLight.intensity = 0.9; // Stronger intensity
-    ambientLight.diffuse = new BABYLON.Color3(0.9, 0.9, 1.0);
-    ambientLight.specular = new BABYLON.Color3(0.9, 0.9, 1.0);
+    ambientLight.intensity = 1.0; // Maximum intensity
+    ambientLight.diffuse = new BABYLON.Color3(0.95, 0.95, 1.0); // Nearly white light
+    ambientLight.specular = new BABYLON.Color3(1.0, 1.0, 1.0); // White specular highlights
+    ambientLight.groundColor = new BABYLON.Color3(0.9, 0.9, 0.95); // Light blue-tinted ground reflection
+
+    // Add an additional directional light for better shadows and lighting
+    const directionalLight = new BABYLON.DirectionalLight(
+      "directionalLight",
+      new BABYLON.Vector3(-0.5, -1, -0.5),
+      this.scene
+    );
+    directionalLight.intensity = 0.6;
+    directionalLight.diffuse = new BABYLON.Color3(1, 1, 0.95); // Slightly warm light
   }
 
   private createBuildings(): void {
@@ -1578,28 +1612,33 @@ export class GameEngine {
         this.scene
       );
 
-      // Light colored cyberpunk style buildings
+      // Light colored cyberpunk style buildings with texture
       // Randomly select a light color scheme
       const colorSchemes = [
         {
-          diffuse: new BABYLON.Color3(0.8, 0.9, 1.0), // Light blue
-          emissive: new BABYLON.Color3(0.4, 0.5, 0.7),
+          diffuse: new BABYLON.Color3(0.9, 0.95, 1.0), // Very light blue
+          emissive: new BABYLON.Color3(0.5, 0.6, 0.8),
+          pattern: "dots",
         },
         {
-          diffuse: new BABYLON.Color3(1.0, 0.9, 1.0), // Light pink
-          emissive: new BABYLON.Color3(0.6, 0.4, 0.6),
+          diffuse: new BABYLON.Color3(1.0, 0.95, 1.0), // Very light pink
+          emissive: new BABYLON.Color3(0.7, 0.5, 0.7),
+          pattern: "grid",
         },
         {
-          diffuse: new BABYLON.Color3(0.9, 1.0, 0.9), // Light green
-          emissive: new BABYLON.Color3(0.5, 0.7, 0.5),
+          diffuse: new BABYLON.Color3(0.95, 1.0, 0.95), // Very light green
+          emissive: new BABYLON.Color3(0.6, 0.8, 0.6),
+          pattern: "stripes",
         },
         {
-          diffuse: new BABYLON.Color3(1.0, 1.0, 0.8), // Light yellow
-          emissive: new BABYLON.Color3(0.7, 0.7, 0.4),
+          diffuse: new BABYLON.Color3(1.0, 1.0, 0.9), // Very light yellow
+          emissive: new BABYLON.Color3(0.8, 0.8, 0.5),
+          pattern: "noise",
         },
         {
-          diffuse: new BABYLON.Color3(1.0, 0.85, 0.8), // Light orange
-          emissive: new BABYLON.Color3(0.7, 0.5, 0.4),
+          diffuse: new BABYLON.Color3(1.0, 0.9, 0.85), // Very light orange
+          emissive: new BABYLON.Color3(0.8, 0.6, 0.5),
+          pattern: "circles",
         },
       ];
 
@@ -1607,7 +1646,108 @@ export class GameEngine {
         colorSchemes[Math.floor(Math.random() * colorSchemes.length)];
       buildingMaterial.diffuseColor = colorScheme.diffuse;
       buildingMaterial.emissiveColor = colorScheme.emissive;
-      buildingMaterial.specularColor = new BABYLON.Color3(0.4, 0.4, 0.4);
+      buildingMaterial.specularColor = new BABYLON.Color3(0.6, 0.6, 0.6);
+
+      // Create a procedural texture for the building
+      const textureSize = 512;
+      const buildingTexture = new BABYLON.DynamicTexture(
+        `buildingTexture-${i}`,
+        { width: textureSize, height: textureSize },
+        this.scene
+      );
+
+      const ctx = buildingTexture.getContext();
+
+      // Fill with base color
+      const baseColor = colorToHex(colorScheme.diffuse);
+      ctx.fillStyle = baseColor;
+      ctx.fillRect(0, 0, textureSize, textureSize);
+
+      // Add texture pattern based on the chosen pattern
+      const detailColor = colorToHex(
+        colorScheme.emissive,
+        0.7 // Make pattern color more visible but still light
+      );
+      ctx.fillStyle = detailColor;
+
+      switch (colorScheme.pattern) {
+        case "dots":
+          // Create dot pattern
+          for (let x = 20; x < textureSize; x += 40) {
+            for (let y = 20; y < textureSize; y += 40) {
+              const size = 4 + Math.random() * 6;
+              ctx.beginPath();
+              ctx.arc(
+                x + Math.random() * 10,
+                y + Math.random() * 10,
+                size,
+                0,
+                Math.PI * 2
+              );
+              ctx.fill();
+            }
+          }
+          break;
+
+        case "grid":
+          // Create grid pattern
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = detailColor;
+          for (let x = 0; x <= textureSize; x += 64) {
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, textureSize);
+            ctx.stroke();
+          }
+
+          for (let y = 0; y <= textureSize; y += 64) {
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(textureSize, y);
+            ctx.stroke();
+          }
+          break;
+
+        case "stripes":
+          // Create horizontal stripes
+          const stripeHeight = 50;
+          for (let y = 0; y < textureSize; y += stripeHeight * 2) {
+            ctx.fillRect(0, y, textureSize, stripeHeight);
+          }
+          break;
+
+        case "noise":
+          // Create noise texture
+          for (let i = 0; i < 2000; i++) {
+            const x = Math.random() * textureSize;
+            const y = Math.random() * textureSize;
+            const size = 1 + Math.random() * 3;
+            ctx.beginPath();
+            ctx.arc(x, y, size, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          break;
+
+        case "circles":
+          // Create concentric circles
+          for (let i = 0; i < 5; i++) {
+            const centerX = textureSize / 2;
+            const centerY = textureSize / 2;
+            const radius = 30 + i * 60;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+            ctx.lineWidth = 10;
+            ctx.strokeStyle = detailColor;
+            ctx.stroke();
+          }
+          break;
+      }
+
+      // Update the texture
+      buildingTexture.update();
+
+      // Apply the texture to the building
+      buildingMaterial.diffuseTexture = buildingTexture;
 
       building.material = buildingMaterial;
 
@@ -1649,19 +1789,124 @@ export class GameEngine {
         this.scene
       );
 
-      // Light-colored platforms
+      // Light-colored platforms with texture
       const platformColors = [
-        new BABYLON.Color3(1.0, 0.85, 0.95), // Light pink
-        new BABYLON.Color3(0.85, 0.95, 1.0), // Light cyan
-        new BABYLON.Color3(0.95, 0.85, 1.0), // Light lavender
-        new BABYLON.Color3(1.0, 0.98, 0.85), // Light yellow
-        new BABYLON.Color3(0.85, 1.0, 0.9), // Light mint
+        new BABYLON.Color3(1.0, 0.92, 0.98), // Very light pink
+        new BABYLON.Color3(0.92, 0.98, 1.0), // Very light cyan
+        new BABYLON.Color3(0.98, 0.92, 1.0), // Very light lavender
+        new BABYLON.Color3(1.0, 0.99, 0.92), // Very light yellow
+        new BABYLON.Color3(0.92, 1.0, 0.95), // Very light mint
       ];
 
       const colorIndex = index % platformColors.length;
-      platformMaterial.diffuseColor = platformColors[colorIndex];
-      platformMaterial.emissiveColor = platformColors[colorIndex].scale(0.5);
+      const baseColor = platformColors[colorIndex];
+      platformMaterial.diffuseColor = baseColor;
+      platformMaterial.emissiveColor = baseColor.scale(0.5);
       platformMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
+
+      // Create a procedural texture for the platform
+      const textureSize = 256;
+      const platformTexture = new BABYLON.DynamicTexture(
+        `platformTexture-${index}`,
+        { width: textureSize, height: textureSize },
+        this.scene
+      );
+
+      const ctx = platformTexture.getContext();
+
+      // Fill with the base color
+      const baseColorHex = colorToHex(baseColor);
+      ctx.fillStyle = baseColorHex;
+      ctx.fillRect(0, 0, textureSize, textureSize);
+
+      // Add a glowing edge pattern
+      const glowColor = colorToHex(baseColor.scale(0.7), 0.9);
+      ctx.strokeStyle = glowColor;
+      ctx.lineWidth = 8;
+
+      // Draw a border
+      ctx.strokeRect(8, 8, textureSize - 16, textureSize - 16);
+
+      // Add a center pattern based on the index
+      ctx.fillStyle = glowColor;
+
+      switch (index % 5) {
+        case 0:
+          // Concentric circles
+          for (let i = 0; i < 3; i++) {
+            const radius = 20 + i * 20;
+            ctx.beginPath();
+            ctx.arc(textureSize / 2, textureSize / 2, radius, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          break;
+
+        case 1:
+          // Diamond pattern
+          ctx.beginPath();
+          ctx.moveTo(textureSize / 2, 50);
+          ctx.lineTo(textureSize - 50, textureSize / 2);
+          ctx.lineTo(textureSize / 2, textureSize - 50);
+          ctx.lineTo(50, textureSize / 2);
+          ctx.closePath();
+          ctx.stroke();
+          break;
+
+        case 2:
+          // X pattern
+          ctx.beginPath();
+          ctx.moveTo(50, 50);
+          ctx.lineTo(textureSize - 50, textureSize - 50);
+          ctx.moveTo(textureSize - 50, 50);
+          ctx.lineTo(50, textureSize - 50);
+          ctx.stroke();
+          break;
+
+        case 3:
+          // Grid pattern
+          for (let i = 50; i < textureSize; i += 50) {
+            // Vertical line
+            ctx.beginPath();
+            ctx.moveTo(i, 50);
+            ctx.lineTo(i, textureSize - 50);
+            ctx.stroke();
+
+            // Horizontal line
+            ctx.beginPath();
+            ctx.moveTo(50, i);
+            ctx.lineTo(textureSize - 50, i);
+            ctx.stroke();
+          }
+          break;
+
+        case 4:
+          // Spiral pattern
+          const centerX = textureSize / 2;
+          const centerY = textureSize / 2;
+          const maxRadius = textureSize / 2 - 30;
+
+          ctx.beginPath();
+          for (let angle = 0; angle < Math.PI * 8; angle += 0.1) {
+            const radius = (angle / (Math.PI * 8)) * maxRadius;
+            const x = centerX + Math.cos(angle) * radius;
+            const y = centerY + Math.sin(angle) * radius;
+
+            if (angle === 0) {
+              ctx.moveTo(x, y);
+            } else {
+              ctx.lineTo(x, y);
+            }
+          }
+          ctx.stroke();
+          break;
+      }
+
+      // Update the texture
+      platformTexture.update();
+
+      // Apply the texture to the platform
+      platformMaterial.diffuseTexture = platformTexture;
+
       platform.material = platformMaterial;
     });
   }
