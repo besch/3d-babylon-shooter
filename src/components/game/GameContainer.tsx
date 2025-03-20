@@ -352,12 +352,17 @@ export function GameContainer() {
               Math.pow(camera.position.z - lastPositionUpdate.z, 2)
           );
 
-          // Only update if moved enough or enough time has passed
+          // Calculate height difference to detect standing on platforms
+          const heightDiff = Math.abs(camera.position.y - lastPositionUpdate.y);
+
+          // Only update if moved enough, height changed, or enough time has passed
           const shouldUpdate =
             distMoved > minMovementThreshold ||
+            heightDiff > 0.1 || // Add height difference check
             now - lastPositionUpdate.time > 1000; // Force update after 1 second
 
-          if (shouldUpdate && !localPlayer.isJumping) {
+          // Always update position, even when not jumping or moving horizontally
+          if (shouldUpdate) {
             // Update local player state with current position
             const updatedPlayer = {
               ...localPlayer,
@@ -379,8 +384,7 @@ export function GameContainer() {
 
             // Only if enough time has passed since last network update
             if (now - lastPositionUpdate.time >= minUpdateInterval) {
-              // Send to server but only during regular movement, not during jumps
-              // (jumps are handled directly in the engine.ts with more frequent updates)
+              // Send to server for all position updates, including standing on platforms
               sendPlayerUpdate(updatedPlayer);
 
               // Remember this position and time

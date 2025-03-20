@@ -325,7 +325,7 @@ export class GameEngine {
             const ray = new BABYLON.Ray(
               this.camera.position,
               new BABYLON.Vector3(0, -1, 0),
-              1.9 // Check distance to ground
+              2.5 // Increase check distance to detect platforms below
             );
 
             const hit = this.scene.pickWithRay(ray);
@@ -1386,11 +1386,12 @@ export class GameEngine {
     playerMesh.position.x = player.position.x;
 
     // For jumping, check if isJumping is true AND y position is > 0
-    if (player.isJumping && player.position.y > 0) {
-      // Direct position update for jumping - subtract player height to account for character center
+    // For platforms, check if y position is > 0 even when not jumping
+    if (player.position.y > 0) {
+      // Direct position update for elevated positions - subtract player height to account for character center
       playerMesh.position.y = Math.max(0, player.position.y - 1.8);
     } else {
-      // When not jumping or landing, keep at ground level
+      // When not elevated, keep at ground level
       playerMesh.position.y = 0;
     }
 
@@ -2187,7 +2188,7 @@ export class GameEngine {
           this.camera.position.z
         ),
         new BABYLON.Vector3(0, -1, 0),
-        1.0
+        2.0 // Increase check distance to better detect platforms
       );
 
       const hit = this.scene.pickWithRay(ray);
@@ -2214,11 +2215,9 @@ export class GameEngine {
         // Ensure we're updating the local player's position too
         this.localPlayer.position.y = this.camera.position.y;
 
-        // Only send updates at intervals to avoid flooding
-        if (currentTime - lastUpdateTime > updateInterval) {
-          this.sendPlayerUpdate();
-          lastUpdateTime = currentTime;
-        }
+        // Force sending updates more frequently during jumps
+        this.sendPlayerUpdate();
+        lastUpdateTime = currentTime;
 
         // Check if landed on ground (y=0)
         if (this.camera.position.y <= 1.8) {
