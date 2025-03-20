@@ -1976,17 +1976,19 @@ export class GameEngine {
   private createNeonLights(): void {
     if (!BABYLON || !this.scene) return;
 
-    // Create more neon light sources with higher intensity
+    // Create more neon light sources with very bright light colors
     const colors = [
-      new BABYLON.Color3(1.0, 0.85, 0.95), // Light pink
-      new BABYLON.Color3(0.85, 0.95, 1.0), // Light cyan
-      new BABYLON.Color3(0.95, 0.85, 1.0), // Light lavender
-      new BABYLON.Color3(1.0, 0.98, 0.85), // Light yellow
-      new BABYLON.Color3(0.85, 1.0, 0.9), // Light mint
+      new BABYLON.Color3(1.0, 0.9, 0.95), // Brighter pink
+      new BABYLON.Color3(0.9, 0.95, 1.0), // Brighter cyan
+      new BABYLON.Color3(0.95, 0.9, 1.0), // Brighter lavender
+      new BABYLON.Color3(1.0, 0.98, 0.9), // Brighter yellow
+      new BABYLON.Color3(0.9, 1.0, 0.95), // Brighter mint
+      new BABYLON.Color3(1.0, 0.95, 0.9), // Brighter peach
+      new BABYLON.Color3(0.95, 1.0, 1.0), // Bright white-blue
     ];
 
-    // Create more lights
-    for (let i = 0; i < 50; i++) {
+    // Create more lights for better coverage
+    for (let i = 0; i < 70; i++) {
       const posX = (Math.random() - 0.5) * 160;
       const posY = 0.5 + Math.random() * 20;
       const posZ = (Math.random() - 0.5) * 160;
@@ -1994,7 +1996,7 @@ export class GameEngine {
       const colorIndex = Math.floor(Math.random() * colors.length);
       const color = colors[colorIndex];
 
-      // Create a brighter neon light source
+      // Create a much brighter neon light source
       const light = new BABYLON.PointLight(
         `neonLight-${i}`,
         new BABYLON.Vector3(posX, posY, posZ),
@@ -2003,13 +2005,13 @@ export class GameEngine {
 
       light.diffuse = color;
       light.specular = color;
-      light.intensity = 0.7 + Math.random() * 0.7; // Higher intensity
-      light.range = 15 + Math.random() * 15; // Larger range
+      light.intensity = 1.0 + Math.random() * 0.5; // Maximum intensity
+      light.range = 20 + Math.random() * 20; // Larger range for more coverage
 
-      // Create a small emissive sphere for the light source
+      // Create a glowing emissive sphere for the light source
       const sphere = BABYLON.MeshBuilder.CreateSphere(
         `neonSphere-${i}`,
-        { diameter: 0.8 }, // Slightly larger
+        { diameter: 1.0 }, // Larger for better visibility
         this.scene
       );
 
@@ -2017,14 +2019,54 @@ export class GameEngine {
       sphere.position.y = posY;
       sphere.position.z = posZ;
 
+      // Create material with texture for better glow effect
       const sphereMaterial = new BABYLON.StandardMaterial(
         `neonMaterial-${i}`,
         this.scene
       );
+
+      // Create a glowing texture
+      const textureSize = 256;
+      const glowTexture = new BABYLON.DynamicTexture(
+        `glowTexture-${i}`,
+        { width: textureSize, height: textureSize },
+        this.scene
+      );
+
+      const ctx = glowTexture.getContext();
+
+      // Create radial gradient for a realistic glow
+      const gradient = ctx.createRadialGradient(
+        textureSize / 2,
+        textureSize / 2,
+        textureSize / 10,
+        textureSize / 2,
+        textureSize / 2,
+        textureSize / 2
+      );
+
+      // Use the color with full alpha in center
+      gradient.addColorStop(0, colorToHex(color, 1.0));
+      // Fade out to transparent at edges
+      gradient.addColorStop(1, colorToHex(color, 0.0));
+
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, textureSize, textureSize);
+
+      // Update the texture
+      glowTexture.update();
+
+      // Apply the texture to the sphere
+      sphereMaterial.diffuseTexture = glowTexture;
       sphereMaterial.diffuseColor = color;
       sphereMaterial.emissiveColor = color;
-      sphereMaterial.specularColor = color;
-      sphereMaterial.alpha = 0.8;
+      sphereMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
+      sphereMaterial.alpha = 0.9;
+
+      // Enable transparency and disable backface culling
+      sphereMaterial.useAlphaFromDiffuseTexture = true;
+      sphereMaterial.backFaceCulling = false;
+
       sphere.material = sphereMaterial;
     }
   }
@@ -2313,22 +2355,121 @@ export class GameEngine {
           this.scene
         );
 
-        try {
-          // Try to parse the color
-          const hex = mapObject.color.replace("#", "");
-          const r = parseInt(hex.substring(0, 2), 16) / 255;
-          const g = parseInt(hex.substring(2, 4), 16) / 255;
-          const b = parseInt(hex.substring(4, 6), 16) / 255;
+        // Use a dynamic texture for all object types
+        const textureSize = 512;
+        const objectTexture = new BABYLON.DynamicTexture(
+          `texture-${mapObject.id}`,
+          { width: textureSize, height: textureSize },
+          this.scene
+        );
+        const ctx = objectTexture.getContext();
 
-          material.diffuseColor = new BABYLON.Color3(r, g, b);
+        try {
+          // Try to parse the color - ensure it's a light color
+          let hex = mapObject.color.replace("#", "");
+          let r = parseInt(hex.substring(0, 2), 16) / 255;
+          let g = parseInt(hex.substring(2, 4), 16) / 255;
+          let b = parseInt(hex.substring(4, 6), 16) / 255;
+
+          // If the color is too dark (average value < 0.6), lighten it
+          const brightness = (r + g + b) / 3;
+          if (brightness < 0.6) {
+            // Lighten the color (make at least 0.7 brightness)
+            const targetBrightness = 0.7;
+            const factor = targetBrightness / Math.max(brightness, 0.1);
+            r = Math.min(r * factor, 1.0);
+            g = Math.min(g * factor, 1.0);
+            b = Math.min(b * factor, 1.0);
+          }
+
+          const color = new BABYLON.Color3(r, g, b);
+          material.diffuseColor = color;
           material.emissiveColor = new BABYLON.Color3(
             r * 0.3,
             g * 0.3,
             b * 0.3
           );
+          material.specularColor = new BABYLON.Color3(0.6, 0.6, 0.6);
+
+          // Fill the texture background with the light color
+          ctx.fillStyle = colorToHex(color);
+          ctx.fillRect(0, 0, textureSize, textureSize);
+
+          // Add texture pattern based on object type
+          switch (mapObject.type) {
+            case "platform":
+              // Add a border pattern
+              ctx.strokeStyle = colorToHex(color.scale(0.8));
+              ctx.lineWidth = 10;
+              ctx.strokeRect(10, 10, textureSize - 20, textureSize - 20);
+
+              // Add a center pattern
+              ctx.beginPath();
+              ctx.arc(
+                textureSize / 2,
+                textureSize / 2,
+                textureSize / 4,
+                0,
+                Math.PI * 2
+              );
+              ctx.stroke();
+              break;
+
+            case "building":
+              // Add window patterns
+              ctx.fillStyle = colorToHex(color.scale(0.85));
+              const windowSize = 30;
+              const spacing = 60;
+
+              for (let x = spacing / 2; x < textureSize; x += spacing) {
+                for (let y = spacing / 2; y < textureSize; y += spacing) {
+                  ctx.fillRect(
+                    x - windowSize / 2,
+                    y - windowSize / 2,
+                    windowSize,
+                    windowSize
+                  );
+                }
+              }
+              break;
+
+            case "light":
+              // Create a glowing gradient
+              const grd = ctx.createRadialGradient(
+                textureSize / 2,
+                textureSize / 2,
+                0,
+                textureSize / 2,
+                textureSize / 2,
+                textureSize / 2
+              );
+              grd.addColorStop(0, colorToHex(color, 1.0));
+              grd.addColorStop(1, colorToHex(color, 0.1));
+
+              ctx.fillStyle = grd;
+              ctx.fillRect(0, 0, textureSize, textureSize);
+              break;
+          }
+
+          // Update the texture
+          objectTexture.update();
+
+          // Apply the texture
+          material.diffuseTexture = objectTexture;
         } catch (e) {
-          // Default color if parsing fails
-          material.diffuseColor = new BABYLON.Color3(0.5, 0.5, 0.5);
+          // Default light color and pattern if parsing fails
+          console.error("Error creating texture:", e);
+          material.diffuseColor = new BABYLON.Color3(0.9, 0.9, 0.9);
+          material.emissiveColor = new BABYLON.Color3(0.3, 0.3, 0.3);
+
+          // Create a basic texture
+          ctx.fillStyle = "#f0f0f0";
+          ctx.fillRect(0, 0, textureSize, textureSize);
+          ctx.strokeStyle = "#e0e0e0";
+          ctx.lineWidth = 8;
+          ctx.strokeRect(16, 16, textureSize - 32, textureSize - 32);
+          objectTexture.update();
+          material.diffuseTexture = objectTexture;
         }
 
         objectMesh.material = material;

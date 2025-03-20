@@ -63,12 +63,15 @@ function createDefaultMapObjects() {
     // Don't create buildings too close to the spawn area
     if (Math.abs(posX) < 20 && Math.abs(posZ) < 20) continue;
 
-    // Building colors
+    // Building colors - using light colors
     const buildingColors = [
-      "#336699", // Blue
-      "#993366", // Purple
-      "#669933", // Green
-      "#996633", // Orange
+      "#a3c9f9", // Light blue
+      "#e9a3f9", // Light purple
+      "#c9f9a3", // Light green
+      "#f9d3a3", // Light orange
+      "#f9a3c9", // Light pink
+      "#a3f9e9", // Light cyan
+      "#f9f9a3", // Light yellow
     ];
 
     objects.push({
