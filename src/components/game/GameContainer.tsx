@@ -29,6 +29,9 @@ export function GameContainer() {
   const [playerHealth, setPlayerHealth] = useState(100);
   const [playerKills, setPlayerKills] = useState(0);
   const [playerDeaths, setPlayerDeaths] = useState(0);
+  // Add menu state
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [soundVolume, setSoundVolume] = useState(1.0); // Default to max volume
 
   // Initialize the game engine when the component mounts
   useEffect(() => {
@@ -517,6 +520,29 @@ export function GameContainer() {
     };
   }, [isPlaying, localPlayer]);
 
+  // Add escape key handler to toggle menu
+  useEffect(() => {
+    if (!isPlaying) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsMenuOpen((prev) => !prev);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isPlaying]);
+
+  // Add effect to update sound volume when it changes
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.setSoundVolume(soundVolume);
+    }
+  }, [soundVolume, engineRef.current]);
+
   const startGame = async () => {
     if (!canvasRef.current) {
       setError("Canvas not available");
@@ -723,13 +749,55 @@ export function GameContainer() {
                 </div>
               </div>
             </div>
-
-            <div className="absolute top-4 right-4">
-              <Button onClick={stopGame} variant="destructive">
-                Exit Game
-              </Button>
-            </div>
           </>
+        )}
+
+        {/* Game Menu */}
+        {isPlaying && isMenuOpen && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm z-20">
+            <div className="bg-slate-800 rounded-lg p-6 w-80 border border-slate-700 shadow-xl">
+              <h2 className="text-2xl font-bold text-white mb-6 text-center">
+                Game Menu
+              </h2>
+
+              <div className="space-y-6">
+                {/* Volume Control */}
+                <div className="space-y-2">
+                  <label className="text-white text-sm font-medium flex justify-between">
+                    <span>Sound Volume</span>
+                    <span>{Math.round(soundVolume * 100)}%</span>
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={soundVolume}
+                    onChange={(e) => setSoundVolume(parseFloat(e.target.value))}
+                    className="w-full accent-rose-500"
+                  />
+                </div>
+
+                {/* Menu Buttons */}
+                <div className="space-y-3 pt-4">
+                  <Button
+                    onClick={() => setIsMenuOpen(false)}
+                    className="w-full bg-slate-600 hover:bg-slate-700"
+                  >
+                    Resume Game
+                  </Button>
+
+                  <Button
+                    onClick={stopGame}
+                    variant="destructive"
+                    className="w-full"
+                  >
+                    Exit Game
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </div>
 

@@ -21,6 +21,9 @@ let soundDie: any = null;
 let isRunning: boolean = false;
 let runSoundInterval: any = null;
 
+// Add a global volume control
+let globalSoundVolume: number = 1.0;
+
 // Add a fallback sound system using standard Web Audio API
 let audioContext: AudioContext | null = null;
 let audioBuffers: Record<string, AudioBuffer> = {};
@@ -54,10 +57,20 @@ function playFallbackSound(soundName: string): boolean {
 
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffers[soundName];
-    source.connect(audioContext.destination);
+
+    // Add gain node to control volume
+    const gainNode = audioContext.createGain();
+    gainNode.gain.value = globalSoundVolume;
+
+    source.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+
     source.start(0);
 
-    if (debugSound) console.log(`Sound ${soundName} started playing`);
+    if (debugSound)
+      console.log(
+        `Sound ${soundName} started playing at volume ${globalSoundVolume}`
+      );
     return true;
   } catch (error: any) {
     console.error(`Error playing fallback sound ${soundName}:`, error);
@@ -3230,5 +3243,34 @@ export class GameEngine {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
     });
+  }
+
+  /**
+   * Set volume for all game sounds
+   * @param volume Volume level from 0.0 to 1.0
+   */
+  public setSoundVolume(volume: number): void {
+    // Ensure volume is between 0 and 1
+    const normalizedVolume = Math.max(0, Math.min(1, volume));
+    globalSoundVolume = normalizedVolume;
+
+    console.log(`Game sound volume set to: ${normalizedVolume}`);
+
+    // Update volume for Babylon sounds if they exist
+    if (soundShoot && soundShoot.setVolume) {
+      soundShoot.setVolume(normalizedVolume);
+    }
+
+    if (soundJump && soundJump.setVolume) {
+      soundJump.setVolume(normalizedVolume);
+    }
+
+    if (soundRun && soundRun.setVolume) {
+      soundRun.setVolume(normalizedVolume);
+    }
+
+    if (soundDie && soundDie.setVolume) {
+      soundDie.setVolume(normalizedVolume);
+    }
   }
 }
