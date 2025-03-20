@@ -230,7 +230,7 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   respawnTime: 3000, // 3 seconds
   recoilForce: 0.5,
   projectileSpeed: 100,
-  jumpForce: 5,
+  jumpForce: 20, // Increased from 5 to 8 for higher jumps
   gravity: 9.81,
 };
 
