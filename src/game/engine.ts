@@ -348,7 +348,7 @@ export class GameEngine {
       );
       this.light.intensity = 0.7;
 
-      // Create skybox with warm blue color and clouds
+      // Create skybox with light blue color
       this.createSkybox();
 
       // Ground setup - changed to light grey with texture
@@ -416,7 +416,7 @@ export class GameEngine {
     const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
     skyboxMaterial.backFaceCulling = false;
 
-    // Create a dynamic texture for the skybox with warm blue color and clouds
+    // Create a dynamic texture for the skybox with light blue color
     const resolution = 1024;
     const skyTexture = new BABYLON.DynamicTexture(
       "skyTexture",
@@ -425,16 +425,16 @@ export class GameEngine {
     );
     const ctx = skyTexture.getContext();
 
-    // Create warm blue gradient background
+    // Create light blue gradient background
     const grd = ctx.createLinearGradient(0, 0, 0, resolution);
-    grd.addColorStop(0, "#5d8cc2"); // Warm blue at top
-    grd.addColorStop(1, "#a7c5e3"); // Lighter blue at horizon
+    grd.addColorStop(0, "#b3d9ff"); // Light blue at top
+    grd.addColorStop(1, "#e6f2ff"); // Very light blue at horizon
 
     ctx.fillStyle = grd;
     ctx.fillRect(0, 0, resolution, resolution);
 
     // Add some cloud patterns
-    ctx.fillStyle = "rgba(255, 255, 255, 0.5)";
+    ctx.fillStyle = "rgba(255, 255, 255, 0.7)";
 
     // Create random clouds
     for (let i = 0; i < 20; i++) {
@@ -471,7 +471,7 @@ export class GameEngine {
   private createGround(): void {
     if (!BABYLON || !this.scene) return;
 
-    // Create a larger ground with a light grey texture
+    // Create a larger ground with a very light grey texture
     this.ground = BABYLON.MeshBuilder.CreateGround(
       "ground",
       { width: 200, height: 200 },
@@ -486,8 +486,8 @@ export class GameEngine {
       "groundMaterial",
       this.scene
     );
-    groundMaterial.diffuseColor = new BABYLON.Color3(0.85, 0.85, 0.85); // Light grey color
-    groundMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+    groundMaterial.diffuseColor = new BABYLON.Color3(0.95, 0.95, 0.97); // Very light blue-grey color
+    groundMaterial.specularColor = new BABYLON.Color3(0.3, 0.3, 0.4);
 
     // Create a texture programmatically
     const gridTexture = new BABYLON.DynamicTexture(
@@ -1532,10 +1532,10 @@ export class GameEngine {
     // Create neon lights but more of them and brighter
     this.createNeonLights();
 
-    // Create a lighterr fog for cyberpunk atmosphere
+    // Create a very light fog for cyberpunk atmosphere
     this.scene.fogMode = BABYLON.Scene.FOGMODE_EXP;
-    this.scene.fogDensity = 0.005; // Reduced fog density
-    this.scene.fogColor = new BABYLON.Color3(0.2, 0.2, 0.3); // Lighter fog color
+    this.scene.fogDensity = 0.003; // Reduced fog density further
+    this.scene.fogColor = new BABYLON.Color3(0.9, 0.95, 1.0); // Very light blue fog
 
     // Add a stronger ambient light
     const ambientLight = new BABYLON.HemisphericLight(
@@ -1543,9 +1543,9 @@ export class GameEngine {
       new BABYLON.Vector3(0, 1, 0),
       this.scene
     );
-    ambientLight.intensity = 0.8; // Stronger intensity
-    ambientLight.diffuse = new BABYLON.Color3(0.5, 0.5, 0.6);
-    ambientLight.specular = new BABYLON.Color3(0.7, 0.7, 0.8);
+    ambientLight.intensity = 0.9; // Stronger intensity
+    ambientLight.diffuse = new BABYLON.Color3(0.9, 0.9, 1.0);
+    ambientLight.specular = new BABYLON.Color3(0.9, 0.9, 1.0);
   }
 
   private createBuildings(): void {
@@ -1578,32 +1578,36 @@ export class GameEngine {
         this.scene
       );
 
-      // Brighter cyberpunk style buildings
-      // Randomly select a color scheme
+      // Light colored cyberpunk style buildings
+      // Randomly select a light color scheme
       const colorSchemes = [
         {
-          diffuse: new BABYLON.Color3(0.2, 0.4, 0.6),
-          emissive: new BABYLON.Color3(0.1, 0.2, 0.4),
-        }, // Blue
+          diffuse: new BABYLON.Color3(0.8, 0.9, 1.0), // Light blue
+          emissive: new BABYLON.Color3(0.4, 0.5, 0.7),
+        },
         {
-          diffuse: new BABYLON.Color3(0.6, 0.2, 0.5),
-          emissive: new BABYLON.Color3(0.3, 0.1, 0.25),
-        }, // Purple
+          diffuse: new BABYLON.Color3(1.0, 0.9, 1.0), // Light pink
+          emissive: new BABYLON.Color3(0.6, 0.4, 0.6),
+        },
         {
-          diffuse: new BABYLON.Color3(0.5, 0.6, 0.2),
-          emissive: new BABYLON.Color3(0.25, 0.3, 0.1),
-        }, // Green
+          diffuse: new BABYLON.Color3(0.9, 1.0, 0.9), // Light green
+          emissive: new BABYLON.Color3(0.5, 0.7, 0.5),
+        },
         {
-          diffuse: new BABYLON.Color3(0.6, 0.4, 0.2),
-          emissive: new BABYLON.Color3(0.3, 0.2, 0.1),
-        }, // Orange
+          diffuse: new BABYLON.Color3(1.0, 1.0, 0.8), // Light yellow
+          emissive: new BABYLON.Color3(0.7, 0.7, 0.4),
+        },
+        {
+          diffuse: new BABYLON.Color3(1.0, 0.85, 0.8), // Light orange
+          emissive: new BABYLON.Color3(0.7, 0.5, 0.4),
+        },
       ];
 
       const colorScheme =
         colorSchemes[Math.floor(Math.random() * colorSchemes.length)];
       buildingMaterial.diffuseColor = colorScheme.diffuse;
       buildingMaterial.emissiveColor = colorScheme.emissive;
-      buildingMaterial.specularColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+      buildingMaterial.specularColor = new BABYLON.Color3(0.4, 0.4, 0.4);
 
       building.material = buildingMaterial;
 
@@ -1645,13 +1649,13 @@ export class GameEngine {
         this.scene
       );
 
-      // Neon-colored platforms
+      // Light-colored platforms
       const platformColors = [
-        new BABYLON.Color3(1, 0.2, 0.7), // Pink
-        new BABYLON.Color3(0.2, 0.8, 1), // Cyan
-        new BABYLON.Color3(0.8, 0.2, 1), // Purple
-        new BABYLON.Color3(1, 0.8, 0.2), // Yellow
-        new BABYLON.Color3(0.2, 1, 0.5), // Green
+        new BABYLON.Color3(1.0, 0.85, 0.95), // Light pink
+        new BABYLON.Color3(0.85, 0.95, 1.0), // Light cyan
+        new BABYLON.Color3(0.95, 0.85, 1.0), // Light lavender
+        new BABYLON.Color3(1.0, 0.98, 0.85), // Light yellow
+        new BABYLON.Color3(0.85, 1.0, 0.9), // Light mint
       ];
 
       const colorIndex = index % platformColors.length;
@@ -1729,11 +1733,11 @@ export class GameEngine {
 
     // Create more neon light sources with higher intensity
     const colors = [
-      new BABYLON.Color3(1, 0.2, 0.7), // Pink
-      new BABYLON.Color3(0.2, 0.8, 1), // Cyan
-      new BABYLON.Color3(0.8, 0.2, 1), // Purple
-      new BABYLON.Color3(1, 0.8, 0.2), // Yellow
-      new BABYLON.Color3(0.2, 1, 0.5), // Green
+      new BABYLON.Color3(1.0, 0.85, 0.95), // Light pink
+      new BABYLON.Color3(0.85, 0.95, 1.0), // Light cyan
+      new BABYLON.Color3(0.95, 0.85, 1.0), // Light lavender
+      new BABYLON.Color3(1.0, 0.98, 0.85), // Light yellow
+      new BABYLON.Color3(0.85, 1.0, 0.9), // Light mint
     ];
 
     // Create more lights
