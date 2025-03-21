@@ -7,6 +7,7 @@ import {
   sendPlayerUpdate,
   sendProjectile,
 } from "@/lib/supabase/client";
+import { AndroidPlayer } from "./models/AndroidPlayer";
 
 // Define types to avoid missing BABYLON reference
 let BABYLON: any = null;
@@ -1247,151 +1248,14 @@ export class GameEngine {
       // Player is new - create mesh and log join message
       console.log(`New player joined: ${player.id} (${player.name})`);
 
-      // Create an android-like player model
-      // First create a parent mesh for the entire player
-      playerMesh = new BABYLON.TransformNode(`player-${player.id}`, this.scene);
+      // Create android player mesh using the new class
+      const androidPlayer = new AndroidPlayer({
+        id: player.id,
+        name: player.name,
+        scene: this.scene,
+      });
 
-      // Create the body (cylinder for torso)
-      const body = BABYLON.MeshBuilder.CreateCylinder(
-        `player-body-${player.id}`,
-        { height: 1.2, diameter: 0.7, tessellation: 16 },
-        this.scene
-      );
-      body.parent = playerMesh;
-      body.position.y = 0.9; // Position relative to parent
-
-      // Create head (sphere)
-      const head = BABYLON.MeshBuilder.CreateSphere(
-        `player-head-${player.id}`,
-        { diameter: 0.5, segments: 16 },
-        this.scene
-      );
-      head.parent = playerMesh;
-      head.position.y = 1.8; // Position on top of body
-
-      // Create limbs
-      // Left arm
-      const leftArm = BABYLON.MeshBuilder.CreateCylinder(
-        `player-leftArm-${player.id}`,
-        { height: 0.8, diameter: 0.2, tessellation: 8 },
-        this.scene
-      );
-      leftArm.parent = playerMesh;
-      leftArm.position = new BABYLON.Vector3(-0.45, 1.2, 0);
-      leftArm.rotation.z = Math.PI / 4; // Angle arm outward
-
-      // Right arm
-      const rightArm = BABYLON.MeshBuilder.CreateCylinder(
-        `player-rightArm-${player.id}`,
-        { height: 0.8, diameter: 0.2, tessellation: 8 },
-        this.scene
-      );
-      rightArm.parent = playerMesh;
-      rightArm.position = new BABYLON.Vector3(0.45, 1.2, 0);
-      rightArm.rotation.z = -Math.PI / 4; // Angle arm outward
-
-      // Left leg
-      const leftLeg = BABYLON.MeshBuilder.CreateCylinder(
-        `player-leftLeg-${player.id}`,
-        { height: 1.0, diameter: 0.25, tessellation: 8 },
-        this.scene
-      );
-      leftLeg.parent = playerMesh;
-      leftLeg.position = new BABYLON.Vector3(-0.25, 0.4, 0);
-
-      // Right leg
-      const rightLeg = BABYLON.MeshBuilder.CreateCylinder(
-        `player-rightLeg-${player.id}`,
-        { height: 1.0, diameter: 0.25, tessellation: 8 },
-        this.scene
-      );
-      rightLeg.parent = playerMesh;
-      rightLeg.position = new BABYLON.Vector3(0.25, 0.4, 0);
-
-      // Face details (eyes for the android)
-      const leftEye = BABYLON.MeshBuilder.CreateSphere(
-        `player-leftEye-${player.id}`,
-        { diameter: 0.08, segments: 8 },
-        this.scene
-      );
-      leftEye.parent = head;
-      leftEye.position = new BABYLON.Vector3(-0.1, 0.05, 0.21);
-
-      const rightEye = BABYLON.MeshBuilder.CreateSphere(
-        `player-rightEye-${player.id}`,
-        { diameter: 0.08, segments: 8 },
-        this.scene
-      );
-      rightEye.parent = head;
-      rightEye.position = new BABYLON.Vector3(0.1, 0.05, 0.21);
-
-      // Create materials
-      const playerColor = this.getPlayerColor(player.name);
-
-      // Main body material
-      const bodyMaterial = new BABYLON.StandardMaterial(
-        `playerMaterial-${player.id}`,
-        this.scene
-      );
-      bodyMaterial.diffuseColor = playerColor;
-      bodyMaterial.specularColor = new BABYLON.Color3(0.3, 0.3, 0.3);
-      bodyMaterial.emissiveColor = playerColor.scale(0.2); // Subtle glow
-      body.material = bodyMaterial;
-      head.material = bodyMaterial;
-      leftArm.material = bodyMaterial;
-      rightArm.material = bodyMaterial;
-      leftLeg.material = bodyMaterial;
-      rightLeg.material = bodyMaterial;
-
-      // Eye material (glowing)
-      const eyeMaterial = new BABYLON.StandardMaterial(
-        `eyeMaterial-${player.id}`,
-        this.scene
-      );
-      eyeMaterial.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.8);
-      eyeMaterial.emissiveColor = new BABYLON.Color3(0.8, 0.8, 1.0); // Bright glow
-      eyeMaterial.specularColor = new BABYLON.Color3(1, 1, 1);
-      leftEye.material = eyeMaterial;
-      rightEye.material = eyeMaterial;
-
-      // Create a physics impostor for the player to enable bullet collisions
-      const playerImpostor = BABYLON.MeshBuilder.CreateBox(
-        `playerCollider-${player.id}`,
-        { width: 0.7, height: 2, depth: 0.7 },
-        this.scene
-      );
-      playerImpostor.parent = playerMesh;
-      playerImpostor.position.y = 1; // Center of the player model
-      playerImpostor.visibility = 0; // Make it invisible
-
-      // Add physics to the player for collision
-      playerImpostor.physicsImpostor = new BABYLON.PhysicsImpostor(
-        playerImpostor,
-        BABYLON.PhysicsImpostor.BoxImpostor,
-        { mass: 0, restitution: 0.2 },
-        this.scene
-      );
-
-      // Store player metadata
-      playerImpostor.metadata = {
-        playerId: player.id,
-        playerName: player.name,
-        health: this.settings.maxHealth,
-        isHitBox: true,
-      };
-
-      // Store animation references
-      playerMesh.metadata = {
-        playerId: player.id,
-        playerName: player.name,
-        health: this.settings.maxHealth,
-        leftArm,
-        rightArm,
-        leftLeg,
-        rightLeg,
-        head,
-      };
-
+      playerMesh = androidPlayer.getMesh();
       this.players.set(player.id, playerMesh);
     }
 
