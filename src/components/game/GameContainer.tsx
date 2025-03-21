@@ -109,25 +109,27 @@ export function GameContainer() {
 
       // Handle player updates
       if (payload.new && payload.new.id !== localPlayer?.id) {
-        // Skip inactive players
-        if (payload.new.is_active === false) {
-          // If player became inactive, remove them
-          if (payload.old?.is_active === true) {
-            console.log(
-              `Player ${payload.new.id} became inactive, removing from view`
-            );
-            setOtherPlayers((prev) =>
-              prev.filter((p) => p.id !== payload.new.id)
-            );
-            playerLastStates.delete(payload.new.id);
-            if (engineRef.current) {
-              engineRef.current.removePlayer(payload.new.id);
-            }
+        const now = Date.now();
+        const lastUpdateTime = new Date(payload.new.last_updated).getTime();
+        const timeSinceLastUpdate = now - lastUpdateTime;
+
+        // Remove inactive players or those who haven't updated in 10 seconds
+        if (payload.new.is_active === false || timeSinceLastUpdate > 10000) {
+          console.log(
+            `Removing player ${payload.new.id} - ${
+              payload.new.is_active === false ? "inactive" : "timed out"
+            }`
+          );
+          setOtherPlayers((prev) =>
+            prev.filter((p) => p.id !== payload.new.id)
+          );
+          playerLastStates.delete(payload.new.id);
+          if (engineRef.current) {
+            engineRef.current.removePlayer(payload.new.id);
           }
           return;
         }
 
-        const now = Date.now();
         const lastState = playerLastStates.get(payload.new.id);
         const minTimeBetweenUpdates = 50; // ms
 
@@ -438,24 +440,22 @@ export function GameContainer() {
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (localPlayer) {
-        // Using navigator.sendBeacon for more reliable cleanup on page close
+        // Mark player as inactive immediately
         const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
         const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
         if (supabaseUrl && supabaseKey) {
           const url = `${supabaseUrl}/rest/v1/players?id=eq.${localPlayer.id}`;
-          const headers = {
-            "Content-Type": "application/json",
-            apikey: supabaseKey,
-            Authorization: `Bearer ${supabaseKey}`,
-            Prefer: "return=minimal",
+          const data = {
+            is_active: false,
+            last_updated: new Date().toISOString(),
           };
 
+          // Use sendBeacon for more reliable delivery during page unload
           navigator.sendBeacon(
             url,
-            JSON.stringify({
-              headers,
-              method: "DELETE",
+            new Blob([JSON.stringify(data)], {
+              type: "application/json",
             })
           );
         }
@@ -463,9 +463,11 @@ export function GameContainer() {
     };
 
     window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("unload", handleBeforeUnload);
 
     return () => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("unload", handleBeforeUnload);
     };
   }, [localPlayer]);
 
@@ -542,6 +544,31 @@ export function GameContainer() {
       engineRef.current.setSoundVolume(soundVolume);
     }
   }, [soundVolume, engineRef.current]);
+
+  // Add periodic cleanup of inactive players
+  useEffect(() => {
+    if (!isPlaying || !engineRef.current) return;
+
+    const cleanupInterval = setInterval(() => {
+      setOtherPlayers((currentPlayers) => {
+        const now = Date.now();
+        return currentPlayers.filter((player) => {
+          const timeSinceLastUpdate = now - player.lastUpdated;
+          if (timeSinceLastUpdate > 10000) {
+            // 10 seconds timeout
+            console.log(`Removing timed out player: ${player.id}`);
+            if (engineRef.current) {
+              engineRef.current.removePlayer(player.id);
+            }
+            return false;
+          }
+          return true;
+        });
+      });
+    }, 5000); // Check every 5 seconds
+
+    return () => clearInterval(cleanupInterval);
+  }, [isPlaying]);
 
   const startGame = async () => {
     if (!canvasRef.current) {
