@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
+import * as BABYLON from "@babylonjs/core";
 import { Button } from "@/components/ui/button";
 import { GameSettings, Player, MapObject } from "@/game/types";
 // Import the GameEngine type but import the actual engine dynamically
@@ -92,17 +93,25 @@ export function GameContainer() {
 
     let subscription: any;
     listenForPlayerUpdates((payload) => {
-      // Handle DELETE events
-      if (payload.eventType === "DELETE") {
-        if (payload.old && payload.old.id) {
-          setOtherPlayers((prev) =>
-            prev.filter((p) => p.id !== payload.old.id)
+      // Handle DELETE events or inactive players
+      if (
+        payload.eventType === "DELETE" ||
+        (payload.new && payload.new.is_active === false)
+      ) {
+        const playerId = payload.old?.id || payload.new?.id;
+        if (playerId) {
+          console.log(
+            `Removing player ${playerId} - ${
+              payload.eventType === "DELETE" ? "deleted" : "inactive"
+            }`
           );
-          playerLastStates.delete(payload.old.id);
-          // Remove player from the game engine if it's initialized
+          // Remove from game engine first
           if (engineRef.current) {
-            engineRef.current.removePlayer(payload.old.id);
+            engineRef.current.removePlayer(playerId);
           }
+          // Then update state
+          setOtherPlayers((prev) => prev.filter((p) => p.id !== playerId));
+          playerLastStates.delete(playerId);
         }
         return;
       }
@@ -114,19 +123,15 @@ export function GameContainer() {
         const timeSinceLastUpdate = now - lastUpdateTime;
 
         // Remove inactive players or those who haven't updated in 10 seconds
-        if (payload.new.is_active === false || timeSinceLastUpdate > 10000) {
-          console.log(
-            `Removing player ${payload.new.id} - ${
-              payload.new.is_active === false ? "inactive" : "timed out"
-            }`
-          );
+        if (timeSinceLastUpdate > 10000) {
+          console.log(`Removing timed out player ${payload.new.id}`);
+          if (engineRef.current) {
+            engineRef.current.removePlayer(payload.new.id);
+          }
           setOtherPlayers((prev) =>
             prev.filter((p) => p.id !== payload.new.id)
           );
           playerLastStates.delete(payload.new.id);
-          if (engineRef.current) {
-            engineRef.current.removePlayer(payload.new.id);
-          }
           return;
         }
 
@@ -611,13 +616,17 @@ export function GameContainer() {
       // Try to enable physics (simplified now)
       engine.enablePhysics();
 
+      // Get a random spawn position
+      const spawnPos = engine.getRandomSpawnPosition();
+      const randomRotation = Math.random() * Math.PI * 2;
+
       // Create a local player
       const newPlayer: Player = {
         id: uuidv4(),
         name: "Player",
         health: 100,
-        position: { x: 0, y: 0, z: 0 },
-        rotation: { x: 0, y: 0, z: 0 },
+        position: spawnPos,
+        rotation: { x: 0, y: randomRotation, z: 0 },
         velocity: { x: 0, y: 0, z: 0 },
         isJumping: false,
         isCrouching: false,
@@ -626,11 +635,18 @@ export function GameContainer() {
         lastUpdated: Date.now(),
       };
 
-      // Set the local player in the component state
-      setLocalPlayer(newPlayer);
-
-      // Set the local player in the game engine
+      // Set the local player in the game engine first
       engine.setLocalPlayer(newPlayer);
+
+      // Then set the camera position to match
+      const camera = engine.getCamera();
+      if (camera) {
+        camera.position = new BABYLON.Vector3(spawnPos.x, 1.8, spawnPos.z);
+        camera.rotation.y = randomRotation;
+      }
+
+      // Finally set the local player in the component state
+      setLocalPlayer(newPlayer);
 
       // Register health update callback for direct UI updates
       engine.onLocalPlayerHit((newHealth) => {

@@ -581,14 +581,13 @@ export class GameEngine {
     }
   }
 
-  private loadSounds(): void {
+  private async loadSounds(): Promise<void> {
     if (!BABYLON || !this.scene) return;
 
-    // Preload all sounds with correct paths and make sure they're ready to play
     try {
       console.log("Loading game sounds...");
 
-      // Always use Web Audio API fallback system since we know it works in the test page
+      // Always use Web Audio API fallback system
       useFallbackAudio = true;
       console.log("Using Web Audio API fallback system for all sounds");
 
@@ -596,106 +595,98 @@ export class GameEngine {
       const basePath = window.location.origin;
       console.log("Base URL for sound loading:", basePath);
 
-      // Initialize fallback audio system
+      // Initialize audio context with better error handling
       try {
-        // Create audio context with better error handling
-        try {
-          audioContext = new (window.AudioContext ||
-            (window as any).webkitAudioContext)();
-          console.log(
-            "✓ Audio context created successfully:",
-            audioContext?.state
-          );
-        } catch (audioContextError) {
-          console.error("Failed to create audio context:", audioContextError);
-          return; // Exit if we can't create an audio context
-        }
-
-        // Function to verify sound is loaded
-        const testSound = (name: string) => {
-          if (audioBuffers[name]) {
-            console.log(`✓ Sound verified loaded: ${name}`);
-          } else {
-            console.error(`✗ Sound failed to load: ${name}`);
-          }
-        };
-
-        // Load and test each sound
-        Promise.all([
-          loadAudioBuffer(`${basePath}/sounds/shoot.mp3`, "shoot").then(() =>
-            testSound("shoot")
-          ),
-          loadAudioBuffer(`${basePath}/sounds/jump.mp3`, "jump").then(() =>
-            testSound("jump")
-          ),
-          loadAudioBuffer(`${basePath}/sounds/run.mp3`, "run").then(() =>
-            testSound("run")
-          ),
-          loadAudioBuffer(`${basePath}/sounds/die.mp3`, "die").then(() =>
-            testSound("die")
-          ),
-        ])
-          .then(() => {
-            console.log("All fallback sounds loaded successfully");
-          })
-          .catch((err) => {
-            console.error("Error loading some sounds:", err);
-          });
-      } catch (audioError: any) {
-        console.error("Failed to initialize fallback audio:", audioError);
+        audioContext = new (window.AudioContext ||
+          (window as any).webkitAudioContext)();
+        console.log(
+          "✓ Audio context created successfully:",
+          audioContext?.state
+        );
+      } catch (audioContextError) {
+        console.error("Failed to create audio context:", audioContextError);
+        return;
       }
 
-      // Skip Babylon sound loading since we're forcing fallback audio
-
-      // Play a test sound once on user interaction to unlock audio
-      const unlockAudio = () => {
-        console.log("User interaction detected - trying to unlock audio");
-
-        // Unlock the Web Audio API context
-        if (audioContext && audioContext.state === "suspended") {
+      // Function to load a sound with retries
+      const loadSoundWithRetry = async (
+        soundName: string,
+        maxRetries = 3
+      ): Promise<void> => {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
           try {
-            const resumePromise = audioContext.resume();
-            resumePromise
-              .then(() => {
-                console.log(
-                  "✓ Audio context resumed successfully, state:",
-                  audioContext?.state
-                );
-
-                // Play a test sound to verify
-                setTimeout(() => {
-                  console.log("Testing sound playback...");
-                  if (audioContext) playFallbackSound("shoot");
-                }, 500);
-              })
-              .catch((err: any) => {
-                console.error("Failed to resume audio context:", err);
-              });
-          } catch (resumeError) {
-            console.error("Error trying to resume audio context:", resumeError);
+            await loadAudioBuffer(
+              `${basePath}/sounds/${soundName}.mp3`,
+              soundName
+            );
+            console.log(
+              `✓ Sound loaded successfully: ${soundName} (attempt ${attempt})`
+            );
+            return;
+          } catch (error) {
+            console.warn(
+              `Attempt ${attempt} failed to load ${soundName}:`,
+              error
+            );
+            if (attempt === maxRetries) {
+              console.error(
+                `Failed to load ${soundName} after ${maxRetries} attempts`
+              );
+              throw error;
+            }
+            // Wait before retrying
+            await new Promise((resolve) => setTimeout(resolve, 1000));
           }
-        } else {
-          console.log(
-            "Audio context already active, state:",
-            audioContext?.state
-          );
+        }
+      };
 
-          // Play a test sound to verify anyway
-          setTimeout(() => {
-            console.log("Testing sound playback...");
-            if (audioContext) playFallbackSound("shoot");
-          }, 500);
+      // Load all sounds with retries
+      try {
+        await Promise.all([
+          loadSoundWithRetry("shoot"),
+          loadSoundWithRetry("jump"),
+          loadSoundWithRetry("run"),
+          loadSoundWithRetry("die"),
+        ]);
+        console.log("✓ All sounds loaded successfully");
+      } catch (loadError) {
+        console.error("Failed to load some sounds:", loadError);
+      }
+
+      // Set up audio unlock on user interaction
+      const unlockAudio = async () => {
+        console.log("User interaction detected - unlocking audio");
+
+        if (audioContext?.state === "suspended") {
+          try {
+            await audioContext.resume();
+            console.log(
+              "✓ Audio context resumed successfully, state:",
+              audioContext.state
+            );
+
+            // Verify sound playback
+            setTimeout(() => {
+              if (audioContext && audioBuffers["shoot"]) {
+                playFallbackSound("shoot");
+                console.log("✓ Test sound played successfully");
+              }
+            }, 500);
+          } catch (resumeError) {
+            console.error("Failed to resume audio context:", resumeError);
+          }
         }
 
+        // Remove listeners after successful unlock
         document.removeEventListener("click", unlockAudio);
         document.removeEventListener("keydown", unlockAudio);
       };
 
-      // Add event listeners to unlock audio on user interaction
+      // Add event listeners for audio unlock
       document.addEventListener("click", unlockAudio);
       document.addEventListener("keydown", unlockAudio);
-    } catch (error: any) {
-      console.error("Error loading sounds:", error);
+    } catch (error) {
+      console.error("Error in loadSounds:", error);
     }
   }
 
@@ -1169,7 +1160,7 @@ export class GameEngine {
   /**
    * Get a random spawn position for respawning players
    */
-  private getRandomSpawnPosition(): any {
+  public getRandomSpawnPosition(): any {
     // Use a larger radius to utilize more of the map
     const spawnRadius = 80; // Half the map size (200/2 - margin)
 
@@ -1237,6 +1228,24 @@ export class GameEngine {
 
   public setLocalPlayer(player: Player): void {
     this.localPlayer = player;
+
+    // Set the camera position to match the player's spawn position
+    if (this.camera) {
+      this.camera.position = new BABYLON.Vector3(
+        player.position.x,
+        1.8, // Fixed height off the ground
+        player.position.z
+      );
+
+      // Set the camera rotation to match player's initial rotation
+      this.camera.rotation = new BABYLON.Vector3(
+        player.rotation.x,
+        player.rotation.y,
+        player.rotation.z
+      );
+
+      console.log("Set initial camera position:", this.camera.position);
+    }
   }
 
   public updatePlayer(player: Player): void {
@@ -1349,17 +1358,40 @@ export class GameEngine {
   }
 
   public removePlayer(playerId: string): void {
+    // Get all meshes in the scene with this player's ID
+    const playerMeshes = this.scene.meshes.filter(
+      (mesh) =>
+        mesh.name.includes(`player-${playerId}`) ||
+        mesh.name.includes(`playerCollider-${playerId}`)
+    );
+
+    // Dispose all meshes associated with this player
+    playerMeshes.forEach((mesh) => {
+      if (mesh.material) {
+        mesh.material.dispose();
+      }
+      mesh.dispose();
+    });
+
+    // Clean up from the players map
     const playerMesh = this.players.get(playerId);
     if (playerMesh) {
-      playerMesh.dispose();
+      if (playerMesh.dispose) {
+        playerMesh.dispose();
+      }
       this.players.delete(playerId);
     }
 
+    // Clean up any weapons
     const weapon = this.weapons.get(playerId);
     if (weapon) {
-      weapon.dispose();
+      if (weapon.dispose) {
+        weapon.dispose();
+      }
       this.weapons.delete(playerId);
     }
+
+    console.log(`Removed player ${playerId} and cleaned up all resources`);
   }
 
   public enablePhysics(): void {
@@ -2822,7 +2854,9 @@ export class GameEngine {
     // Previous position to track movement
     let prevPosition = { x: 0, z: 0 };
     let lastSoundTime = 0;
-    const MIN_SOUND_INTERVAL = 1000; // Minimum time in ms between run sounds (1 second)
+    let isRunning = false;
+    let runSoundInterval: any = null;
+    const MIN_SOUND_INTERVAL = 1000; // Minimum time in ms between run sounds
 
     // Track player movement to trigger run sound
     this.scene.registerBeforeRender(() => {
@@ -2858,30 +2892,12 @@ export class GameEngine {
           runSoundInterval = null;
         }
 
-        // Play a single run sound immediately
+        // Try to play initial run sound
         const now = Date.now();
         if (now - lastSoundTime >= MIN_SOUND_INTERVAL) {
           lastSoundTime = now;
-          if (useFallbackAudio) {
-            playFallbackSound("run");
-          } else if (soundRun && !soundRun.isPlaying) {
-            try {
-              soundRun.play();
-            } catch (error) {
-              console.error("Error playing run sound:", error);
-              playFallbackSound("run");
-            }
-          }
-        }
-
-        // Set up interval to play run sound at appropriate intervals
-        runSoundInterval = setInterval(() => {
-          if (!isRunning) return;
-
-          const currentTime = Date.now();
-          if (currentTime - lastSoundTime >= MIN_SOUND_INTERVAL) {
-            lastSoundTime = currentTime;
-
+          // Check if sound is loaded before trying to play
+          if (audioBuffers["run"]) {
             if (useFallbackAudio) {
               playFallbackSound("run");
             } else if (soundRun && !soundRun.isPlaying) {
@@ -2892,14 +2908,41 @@ export class GameEngine {
                 playFallbackSound("run");
               }
             }
+          } else {
+            console.warn("Run sound not loaded yet");
           }
-        }, MIN_SOUND_INTERVAL); // Use the minimum sound interval
+        }
+
+        // Set up interval to play run sound at appropriate intervals
+        runSoundInterval = setInterval(() => {
+          if (!isRunning) {
+            clearInterval(runSoundInterval);
+            runSoundInterval = null;
+            return;
+          }
+
+          const currentTime = Date.now();
+          if (currentTime - lastSoundTime >= MIN_SOUND_INTERVAL) {
+            lastSoundTime = currentTime;
+            // Check if sound is loaded before trying to play
+            if (audioBuffers["run"]) {
+              if (useFallbackAudio) {
+                playFallbackSound("run");
+              } else if (soundRun && !soundRun.isPlaying) {
+                try {
+                  soundRun.play();
+                } catch (error) {
+                  console.error("Error playing run sound:", error);
+                  playFallbackSound("run");
+                }
+              }
+            }
+          }
+        }, MIN_SOUND_INTERVAL);
       }
       // Stop run sound if stopped moving
       else if (!isMovingNow && isRunning) {
         isRunning = false;
-
-        // Clear interval when stopped running
         if (runSoundInterval) {
           clearInterval(runSoundInterval);
           runSoundInterval = null;
