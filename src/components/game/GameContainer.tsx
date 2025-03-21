@@ -881,6 +881,11 @@ export function GameContainer() {
       {/* Show menu when not playing */}
       {!isPlaying && (
         <div className="flex flex-col items-center justify-center space-y-4 p-6 bg-slate-900 rounded-lg">
+          <img
+            src="/pict.webp"
+            alt="The Vibe Shooter"
+            className="w-56 object-contain mb-6"
+          />
           <h1 className="text-3xl font-bold mb-6 text-white">
             The Vibe Shooter
           </h1>
