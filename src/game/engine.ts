@@ -1088,25 +1088,6 @@ export class GameEngine {
 
       // If player has no health left, it's a kill
       if (newHealth <= 0) {
-        // Play death sound for nearby players with better error handling
-        try {
-          if (useFallbackAudio) {
-            console.log("Playing death sound using fallback audio");
-            playFallbackSound("die");
-          } else if (soundDie) {
-            console.log("Playing death sound using Babylon audio");
-            soundDie.play();
-          } else {
-            console.warn("Death sound not loaded");
-            // Try fallback anyway
-            playFallbackSound("die");
-          }
-        } catch (error) {
-          console.error("Error playing death sound:", error);
-          // Try fallback as last resort
-          playFallbackSound("die");
-        }
-
         // Increment local player kills
         if (this.localPlayer) {
           this.localPlayer.kills += 1;
