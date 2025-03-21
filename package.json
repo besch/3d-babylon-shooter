@@ -24,6 +24,7 @@
     "@supabase/ssr": "^0.6.1",
     "@supabase/supabase-js": "^2.49.1",
     "@types/uuid": "^10.0.0",
+    "@vercel/analytics": "^1.5.0",
     "cannon": "^0.6.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -49,11 +50,11 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^7.0.3",
     "eslint": "^9",
     "eslint-config-next": "15.2.3",
     "node-fetch": "^2.7.0",
     "tailwindcss": "^4",
-    "typescript": "^5",
-    "cross-env": "^7.0.3"
+    "typescript": "^5"
   }
 }
