@@ -884,7 +884,7 @@ export function GameContainer() {
           <img
             src="/pict.webp"
             alt="The Vibe Shooter"
-            className="w-56 object-contain mb-6"
+            className="w-156 object-contain mb-6"
           />
           <h1 className="text-3xl font-bold mb-6 text-white">
             The Vibe Shooter
