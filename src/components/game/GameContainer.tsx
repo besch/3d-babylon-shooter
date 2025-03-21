@@ -33,6 +33,7 @@ export function GameContainer() {
   // Add menu state
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [soundVolume, setSoundVolume] = useState(1.0); // Default to max volume
+  const [backgroundMusicVolume, setBackgroundMusicVolume] = useState(0.33); // Default to 1/3 of main volume
 
   // Initialize the game engine when the component mounts
   useEffect(() => {
@@ -550,6 +551,13 @@ export function GameContainer() {
     }
   }, [soundVolume, engineRef.current]);
 
+  // Add effect to update background music volume when it changes
+  useEffect(() => {
+    if (engineRef.current) {
+      engineRef.current.setBackgroundMusicVolume(backgroundMusicVolume);
+    }
+  }, [backgroundMusicVolume, engineRef.current]);
+
   // Add periodic cleanup of inactive players
   useEffect(() => {
     if (!isPlaying || !engineRef.current) return;
@@ -804,21 +812,45 @@ export function GameContainer() {
               </h2>
 
               <div className="space-y-6">
-                {/* Volume Control */}
-                <div className="space-y-2">
-                  <label className="text-white text-sm font-medium flex justify-between">
-                    <span>Sound Volume</span>
-                    <span>{Math.round(soundVolume * 100)}%</span>
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={soundVolume}
-                    onChange={(e) => setSoundVolume(parseFloat(e.target.value))}
-                    className="w-full accent-rose-500"
-                  />
+                {/* Volume Controls */}
+                <div className="space-y-4">
+                  {/* Sound Effects Volume */}
+                  <div className="space-y-2">
+                    <label className="text-white text-sm font-medium flex justify-between">
+                      <span>Sound Effects</span>
+                      <span>{Math.round(soundVolume * 100)}%</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={soundVolume}
+                      onChange={(e) =>
+                        setSoundVolume(parseFloat(e.target.value))
+                      }
+                      className="w-full accent-rose-500"
+                    />
+                  </div>
+
+                  {/* Background Music Volume */}
+                  <div className="space-y-2">
+                    <label className="text-white text-sm font-medium flex justify-between">
+                      <span>Background Music</span>
+                      <span>{Math.round(backgroundMusicVolume * 100)}%</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={backgroundMusicVolume}
+                      onChange={(e) =>
+                        setBackgroundMusicVolume(parseFloat(e.target.value))
+                      }
+                      className="w-full accent-blue-500"
+                    />
+                  </div>
                 </div>
 
                 {/* Menu Buttons */}

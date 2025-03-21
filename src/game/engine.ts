@@ -19,11 +19,13 @@ let soundShoot: any = null;
 let soundJump: any = null;
 let soundRun: any = null;
 let soundDie: any = null;
+let soundBackground: any = null;
 let isRunning: boolean = false;
 let runSoundInterval: any = null;
 
 // Add a global volume control
 let globalSoundVolume: number = 1.0;
+let backgroundMusicVolume: number = 0.33; // Default to 1/3 of main volume
 
 // Add a fallback sound system using standard Web Audio API
 let audioContext: AudioContext | null = null;
@@ -616,7 +618,9 @@ export class GameEngine {
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
           try {
             await loadAudioBuffer(
-              `${basePath}/sounds/${soundName}.mp3`,
+              `${basePath}/sounds/${soundName}.${
+                soundName === "background" ? "ogg" : "mp3"
+              }`,
               soundName
             );
             console.log(
@@ -647,8 +651,12 @@ export class GameEngine {
           loadSoundWithRetry("jump"),
           loadSoundWithRetry("run"),
           loadSoundWithRetry("die"),
+          loadSoundWithRetry("background"),
         ]);
         console.log("✓ All sounds loaded successfully");
+
+        // Start background music
+        this.startBackgroundMusic();
       } catch (loadError) {
         console.error("Failed to load some sounds:", loadError);
       }
@@ -688,6 +696,32 @@ export class GameEngine {
     } catch (error) {
       console.error("Error in loadSounds:", error);
     }
+  }
+
+  private startBackgroundMusic(): void {
+    if (!audioContext || !audioBuffers["background"]) return;
+
+    const playBackgroundMusic = () => {
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffers["background"];
+
+      // Add gain node to control volume
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = globalSoundVolume * backgroundMusicVolume;
+
+      source.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      // Start playing
+      source.start(0);
+
+      // Set up loop
+      source.onended = () => {
+        playBackgroundMusic();
+      };
+    };
+
+    playBackgroundMusic();
   }
 
   private shoot(): void {
@@ -3178,6 +3212,28 @@ export class GameEngine {
 
     if (soundDie && soundDie.setVolume) {
       soundDie.setVolume(normalizedVolume);
+    }
+
+    // Update background music volume
+    if (audioContext && audioBuffers["background"]) {
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = normalizedVolume * backgroundMusicVolume;
+      gainNode.connect(audioContext.destination);
+    }
+  }
+
+  public setBackgroundMusicVolume(volume: number): void {
+    // Ensure volume is between 0 and 1
+    const normalizedVolume = Math.max(0, Math.min(1, volume));
+    backgroundMusicVolume = normalizedVolume;
+
+    console.log(`Background music volume set to: ${normalizedVolume}`);
+
+    // Update background music volume
+    if (audioContext && audioBuffers["background"]) {
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = globalSoundVolume * normalizedVolume;
+      gainNode.connect(audioContext.destination);
     }
   }
 }
