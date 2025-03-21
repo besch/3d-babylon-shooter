@@ -6,7 +6,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Vibe Shooter",
+  title: "The Vibe Shooter",
   description: "A multiplayer 3D shooter game",
 };
 

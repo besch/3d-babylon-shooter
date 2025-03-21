@@ -831,7 +831,9 @@ export function GameContainer() {
       {/* Show menu when not playing */}
       {!isPlaying && (
         <div className="flex flex-col items-center justify-center space-y-4 p-6 bg-slate-900 rounded-lg">
-          <h1 className="text-3xl font-bold mb-6 text-white">Vibe Shooter</h1>
+          <h1 className="text-3xl font-bold mb-6 text-white">
+            The Vibe Shooter
+          </h1>
 
           {error && (
             <div className="p-3 mb-4 text-red-500 bg-red-100 rounded-md border border-red-300 w-full">
