@@ -716,6 +716,8 @@ export function GameContainer() {
     }
 
     if (engineRef.current) {
+      // Make sure to stop background music before disposing
+      engineRef.current.stopBackgroundMusic();
       engineRef.current.dispose();
       engineRef.current = null;
     }

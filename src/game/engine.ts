@@ -20,10 +20,12 @@ let soundJump: any = null;
 let soundRun: any = null;
 let soundDie: any = null;
 let soundBackground: any = null;
+let backgroundMusicSource: AudioBufferSourceNode | null = null;
+let backgroundMusicGainNode: GainNode | null = null;
 let isRunning: boolean = false;
 let runSoundInterval: any = null;
 
-// Add a global volume control
+// Add separate volume controls for sound effects and background music
 let globalSoundVolume: number = 1.0;
 let backgroundMusicVolume: number = 0.33; // Default to 1/3 of main volume
 
@@ -61,9 +63,13 @@ function playFallbackSound(soundName: string): boolean {
     const source = audioContext.createBufferSource();
     source.buffer = audioBuffers[soundName];
 
-    // Add gain node to control volume
+    // Add gain node to control volume - only for non-background sounds
     const gainNode = audioContext.createGain();
-    gainNode.gain.value = globalSoundVolume;
+    if (soundName === "background") {
+      gainNode.gain.value = backgroundMusicVolume;
+    } else {
+      gainNode.gain.value = globalSoundVolume;
+    }
 
     source.connect(gainNode);
     gainNode.connect(audioContext.destination);
@@ -72,7 +78,9 @@ function playFallbackSound(soundName: string): boolean {
 
     if (debugSound)
       console.log(
-        `Sound ${soundName} started playing at volume ${globalSoundVolume}`
+        `Sound ${soundName} started playing at volume ${
+          soundName === "background" ? backgroundMusicVolume : globalSoundVolume
+        }`
       );
     return true;
   } catch (error: any) {
@@ -597,7 +605,21 @@ export class GameEngine {
       const basePath = window.location.origin;
       console.log("Base URL for sound loading:", basePath);
 
-      // Initialize audio context with better error handling
+      // Clean up old audio context and nodes if they exist
+      if (audioContext) {
+        try {
+          await audioContext.close();
+        } catch (error) {
+          console.error("Error closing old audio context:", error);
+        }
+      }
+
+      // Reset audio buffers
+      audioBuffers = {};
+      backgroundMusicSource = null;
+      backgroundMusicGainNode = null;
+
+      // Initialize new audio context with better error handling
       try {
         audioContext = new (window.AudioContext ||
           (window as any).webkitAudioContext)();
@@ -702,21 +724,31 @@ export class GameEngine {
     if (!audioContext || !audioBuffers["background"]) return;
 
     const playBackgroundMusic = () => {
-      const source = audioContext.createBufferSource();
-      source.buffer = audioBuffers["background"];
+      // Stop any existing background music
+      if (backgroundMusicSource) {
+        backgroundMusicSource.stop();
+      }
 
-      // Add gain node to control volume
-      const gainNode = audioContext.createGain();
-      gainNode.gain.value = globalSoundVolume * backgroundMusicVolume;
+      // Create new source
+      backgroundMusicSource = audioContext.createBufferSource();
+      backgroundMusicSource.buffer = audioBuffers["background"];
 
-      source.connect(gainNode);
-      gainNode.connect(audioContext.destination);
+      // Create gain node if it doesn't exist
+      if (!backgroundMusicGainNode) {
+        backgroundMusicGainNode = audioContext.createGain();
+        backgroundMusicGainNode.gain.value =
+          globalSoundVolume * backgroundMusicVolume;
+      }
+
+      // Connect the nodes
+      backgroundMusicSource.connect(backgroundMusicGainNode);
+      backgroundMusicGainNode.connect(audioContext.destination);
 
       // Start playing
-      source.start(0);
+      backgroundMusicSource.start(0);
 
       // Set up loop
-      source.onended = () => {
+      backgroundMusicSource.onended = () => {
         playBackgroundMusic();
       };
     };
@@ -2024,9 +2056,45 @@ export class GameEngine {
     return this.camera;
   }
 
+  public stopBackgroundMusic(): void {
+    if (backgroundMusicSource) {
+      try {
+        backgroundMusicSource.stop();
+        backgroundMusicSource = null;
+      } catch (error) {
+        console.error("Error stopping background music:", error);
+      }
+    }
+
+    if (backgroundMusicGainNode) {
+      try {
+        backgroundMusicGainNode.disconnect();
+        backgroundMusicGainNode = null;
+      } catch (error) {
+        console.error("Error disconnecting background music gain node:", error);
+      }
+    }
+  }
+
   public dispose(): void {
     if (this.engine) {
       console.log("Disposing game engine");
+
+      // Stop background music and clean up audio nodes
+      this.stopBackgroundMusic();
+
+      // Close audio context
+      if (audioContext) {
+        try {
+          audioContext.close().catch(console.error);
+          audioContext = null;
+        } catch (error) {
+          console.error("Error closing audio context:", error);
+        }
+      }
+
+      // Reset audio buffers
+      audioBuffers = {};
 
       // Clean up sound resources
       if (soundShoot) soundShoot.dispose();
@@ -3195,9 +3263,9 @@ export class GameEngine {
     const normalizedVolume = Math.max(0, Math.min(1, volume));
     globalSoundVolume = normalizedVolume;
 
-    console.log(`Game sound volume set to: ${normalizedVolume}`);
+    console.log(`Game sound effects volume set to: ${normalizedVolume}`);
 
-    // Update volume for Babylon sounds if they exist
+    // Update volume for sound effects only
     if (soundShoot && soundShoot.setVolume) {
       soundShoot.setVolume(normalizedVolume);
     }
@@ -3213,13 +3281,6 @@ export class GameEngine {
     if (soundDie && soundDie.setVolume) {
       soundDie.setVolume(normalizedVolume);
     }
-
-    // Update background music volume
-    if (audioContext && audioBuffers["background"]) {
-      const gainNode = audioContext.createGain();
-      gainNode.gain.value = normalizedVolume * backgroundMusicVolume;
-      gainNode.connect(audioContext.destination);
-    }
   }
 
   public setBackgroundMusicVolume(volume: number): void {
@@ -3229,11 +3290,9 @@ export class GameEngine {
 
     console.log(`Background music volume set to: ${normalizedVolume}`);
 
-    // Update background music volume
-    if (audioContext && audioBuffers["background"]) {
-      const gainNode = audioContext.createGain();
-      gainNode.gain.value = globalSoundVolume * normalizedVolume;
-      gainNode.connect(audioContext.destination);
+    // Update only background music volume
+    if (backgroundMusicGainNode) {
+      backgroundMusicGainNode.gain.value = normalizedVolume;
     }
   }
 }
